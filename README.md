@@ -7,7 +7,7 @@ A passkey-authenticated bar rota management system with TypeScript frontend and 
 ## Demo Videos
 
 ### Onboarding Flow
-[demos/onboarding-flow.mov](./demos/onboarding-flow.mov)
+https://github.com/user-attachments/assets/a6c941d3-b631-4477-977c-6d5a1206f7a7
 
 - **User signs up** 
   - No info leaked except onboarding shifts to unknown users (can potentially be further improved by gating to users with food safety training upload only)
@@ -26,7 +26,7 @@ A passkey-authenticated bar rota management system with TypeScript frontend and 
   - No need to look up user, easy UX
 
 ### Integrated Events and Rota
-[demos/integrated-events-and-rota.mov](./demos/integrated-events-and-rota.mov)
+https://github.com/user-attachments/assets/4ca3bc44-fece-417b-8c5a-65fd81ad51a3
 
 - **Integrated rota requirements with scheduled events**
   - Event requirements (need contract members, need more than minimum bartenders, etc) are automatically integrated into sign-up sheet
