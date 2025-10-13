@@ -1,0 +1,25 @@
+[package]
+name = "wolfson-bar-backend"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace", "fs"] }
+axum-extra = { version = "0.9", features = ["multipart"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-rustls"] }
+webauthn-rs = { version = "0.5", features = ["danger-allow-state-serialisation"] }
+webauthn-rs-proto = "0.5"
+ts-rs = { version = "9", features = ["serde-json-impl"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+jsonwebtoken = "9"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+chrono = { version = "0.4", features = ["serde"] }
+base64 = "0.22"
+icalendar = "0.16"
+regex = "1"

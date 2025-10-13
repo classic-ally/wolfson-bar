@@ -1,0 +1,295 @@
+import { useState } from 'react'
+import { Calendar, dateFnsLocalizer, SlotInfo, ToolbarProps } from 'react-big-calendar'
+import { format, parse, startOfWeek, getDay } from 'date-fns'
+import { enGB } from 'date-fns/locale'
+import 'react-big-calendar/lib/css/react-big-calendar.css'
+import { Event, ShiftInfo, UserStatus } from '../lib/auth'
+
+interface CalendarEvent {
+  id: string
+  title: string
+  start: Date
+  end: Date
+  allDay?: boolean
+  resource?: Event
+}
+
+// Custom toolbar with Subscribe button
+const CustomToolbar = (toolbar: ToolbarProps<CalendarEvent, object>) => {
+  return (
+    <div className="rbc-toolbar">
+      <span className="rbc-btn-group">
+        <button type="button" onClick={() => toolbar.onNavigate('TODAY')}>
+          Today
+        </button>
+        <button type="button" onClick={() => toolbar.onNavigate('PREV')}>
+          Back
+        </button>
+        <button type="button" onClick={() => toolbar.onNavigate('NEXT')}>
+          Next
+        </button>
+      </span>
+      <span className="rbc-toolbar-label">{toolbar.label}</span>
+      <span className="rbc-btn-group">
+        <button
+          type="button"
+          className={toolbar.view === 'month' ? 'rbc-active' : ''}
+          onClick={() => toolbar.onView('month')}
+        >
+          Month
+        </button>
+        <button
+          type="button"
+          className={toolbar.view === 'agenda' ? 'rbc-active' : ''}
+          onClick={() => toolbar.onView('agenda')}
+          style={{
+            borderTopRightRadius: '4px',
+            borderBottomRightRadius: '4px',
+          }}
+        >
+          Agenda
+        </button>
+        <a
+          href={`webcal://${window.location.host}/api/events/calendar.ics`}
+          style={{
+            padding: '6.5px 10px',
+            backgroundColor: '#8B0000',
+            color: 'white',
+            textDecoration: 'none',
+            border: '1px solid #8B0000',
+            borderRadius: '4px',
+            fontSize: '14px',
+            marginLeft: '10px',
+            display: 'inline-block',
+            cursor: 'pointer',
+            lineHeight: 'normal',
+            verticalAlign: 'middle',
+            fontWeight: 400,
+          }}
+        >
+          📅 Subscribe
+        </a>
+      </span>
+    </div>
+  )
+}
+
+const locales = {
+  'en-GB': enGB,
+}
+
+const localizer = dateFnsLocalizer({
+  format,
+  parse,
+  startOfWeek,
+  getDay,
+  locales,
+})
+
+interface EventsCalendarProps {
+  events: Event[]
+  shifts?: ShiftInfo[] // Optional shift info for authenticated users
+  userStatus?: UserStatus | null // User status for induction checking
+  onSelectSlot?: (slotInfo: SlotInfo) => void
+  onSelectEvent?: (event: CalendarEvent) => void
+  selectable?: boolean
+  defaultDate?: Date
+  minDate?: Date
+  maxDate?: Date
+  defaultView?: 'month' | 'agenda'
+  agendaLength?: number // Number of days to show in agenda view
+}
+
+export default function EventsCalendar({
+  events,
+  shifts,
+  userStatus,
+  onSelectSlot,
+  onSelectEvent,
+  selectable = false,
+  defaultDate = new Date(),
+  minDate,
+  maxDate,
+  defaultView = 'month',
+  agendaLength = 90, // Default to 90 days
+}: EventsCalendarProps) {
+  // Use agenda view by default on mobile (< 500px)
+  const getInitialView = () => {
+    if (typeof window !== 'undefined' && window.innerWidth < 500) {
+      return 'agenda'
+    }
+    return defaultView
+  }
+
+  const [currentDate, setCurrentDate] = useState(defaultDate)
+  const [view, setView] = useState<'month' | 'agenda'>(getInitialView())
+
+  // Create a map of date -> shift info for quick lookup
+  const shiftsByDate = new Map<string, ShiftInfo>()
+  if (shifts) {
+    shifts.forEach(shift => {
+      shiftsByDate.set(shift.date, shift)
+    })
+  }
+
+  // Helper to get background color for a date based on shift status
+  const getDateBackgroundColor = (date: Date): { backgroundColor?: string; border?: string; fontWeight?: string } => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const dateToCheck = new Date(date)
+    dateToCheck.setHours(0, 0, 0, 0)
+
+    const isToday = dateToCheck.getTime() === today.getTime()
+    const isPast = dateToCheck < today
+
+    // Don't highlight past dates (except today)
+    if (isPast && !isToday) {
+      return {}
+    }
+
+    if (!shifts) {
+      // If today but no shift data, just add border
+      if (isToday) {
+        return {
+          border: '3px solid #002147',
+          fontWeight: 'bold',
+        }
+      }
+      return {}
+    }
+
+    const dateStr = format(date, 'yyyy-MM-dd')
+    const shift = shiftsByDate.get(dateStr)
+
+    if (!shift) {
+      // If today but no shift data, just add border
+      if (isToday) {
+        return {
+          border: '3px solid #002147',
+          fontWeight: 'bold',
+        }
+      }
+      return {}
+    }
+
+    const isInducted = userStatus?.induction_completed ?? true
+    const hasCommittee = shift.signups.some(s => s.is_committee)
+
+    let backgroundColor: string | undefined
+
+    // For non-inducted users, show grey if no committee member present
+    if (!isInducted && !hasCommittee) {
+      backgroundColor = '#e9ecef' // Light grey - not available for induction
+    }
+    // No fill (filled): signups_count >= max_volunteers
+    else if (shift.signups_count >= shift.max_volunteers) {
+      backgroundColor = undefined // No fill
+    }
+    // Yellow fill (partial): 0 < signups_count < max_volunteers
+    else if (shift.signups_count > 0) {
+      backgroundColor = '#fff3cd' // Light yellow
+    }
+    // Red fill (empty): signups_count === 0
+    else {
+      backgroundColor = '#f8d7da' // Light red
+    }
+
+    // Add prominent border for today
+    if (isToday) {
+      return {
+        backgroundColor,
+        border: '3px solid #002147',
+        fontWeight: 'bold',
+      }
+    }
+
+    return backgroundColor ? { backgroundColor } : {}
+  }
+
+  // Convert our Event[] to react-big-calendar format
+  const calendarEvents: CalendarEvent[] = events.map(event => {
+    const date = new Date(event.event_date + 'T00:00:00') // Force local midnight
+    return {
+      id: event.id,
+      title: event.title,
+      start: date,
+      end: date,
+      allDay: true, // Mark as all-day event
+      resource: event,
+    }
+  })
+
+  return (
+    <div>
+      <div style={{ height: '600px' }}>
+        <Calendar
+          localizer={localizer}
+          events={calendarEvents}
+          startAccessor="start"
+          endAccessor="end"
+          allDayAccessor="allDay"
+          date={currentDate}
+          onNavigate={(date) => setCurrentDate(date)}
+          view={view}
+          onView={(newView) => setView(newView as 'month' | 'agenda')}
+          views={['month', 'agenda']}
+          selectable={selectable}
+          onSelectSlot={onSelectSlot}
+          onSelectEvent={onSelectEvent}
+          min={minDate}
+          max={maxDate}
+          length={agendaLength}
+          components={{
+            toolbar: CustomToolbar,
+          }}
+          style={{ height: '100%' }}
+          formats={{
+            agendaDateFormat: 'dd MMM yyyy',
+            agendaTimeFormat: () => '', // Hide time column
+            agendaTimeRangeFormat: () => '', // Hide time range
+          }}
+          eventPropGetter={(event) => {
+            if (view === 'agenda') {
+              return {
+                style: {
+                  backgroundColor: '#f5f5f5',
+                  borderRadius: '4px',
+                  color: '#333',
+                  border: '1px solid #e0e0e0',
+                  display: 'block',
+                  fontSize: '14px',
+                  padding: '8px 12px',
+                },
+              }
+            }
+            // Month view styling
+            return {
+              style: {
+                backgroundColor: '#8B0000',
+                borderRadius: '4px',
+                opacity: 0.9,
+                color: 'white',
+                border: 'none',
+                display: 'block',
+                fontSize: '11px',
+                padding: '2px 4px',
+                width: '100%',
+                whiteSpace: 'normal',
+                overflow: 'visible',
+                textOverflow: 'clip',
+                lineHeight: '1.2',
+                cursor: 'pointer',
+              },
+            }
+          }}
+          dayPropGetter={(date) => {
+            const styles = getDateBackgroundColor(date)
+            return {
+              style: styles,
+            }
+          }}
+        />
+      </div>
+    </div>
+  )
+}
