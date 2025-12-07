@@ -5,3 +5,4 @@ pub mod events;
 pub mod shifts;
 pub mod calendar;
 pub mod local;
+pub mod stock;

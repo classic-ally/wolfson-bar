@@ -608,3 +608,118 @@ export async function getMyOverview(): Promise<UserOverview> {
 
   return response.json()
 }
+
+// ===== Stock Management =====
+
+export interface Product {
+  id: number
+  name: string
+  description: string | null
+  category: string
+  current_stock: number
+  last_unit_cost: number | null
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateProductRequest {
+  name: string
+  description?: string
+  category: string
+}
+
+/**
+ * Get all products with stock levels (committee only)
+ */
+export async function getProducts(): Promise<Product[]> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/stock/products`)
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to fetch products')
+  }
+
+  return response.json()
+}
+
+/**
+ * Create a new product with specified PoS ID (committee only)
+ */
+export async function createProduct(id: number, product: CreateProductRequest): Promise<Product> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/stock/products/${id}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(product),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to create product')
+  }
+
+  return response.json()
+}
+
+/**
+ * Look up product by barcode (committee only)
+ * Returns product with current stock information
+ */
+export async function lookupBarcode(barcode: string): Promise<Product> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/stock/barcode/${barcode}`)
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Barcode not found')
+  }
+
+  return response.json()
+}
+
+/**
+ * Link a barcode to a product (committee only)
+ */
+export async function addBarcode(productId: number, barcode: string): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/stock/products/${productId}/barcodes`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ barcode }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to add barcode')
+  }
+}
+
+export interface StockTransaction {
+  product_id: number
+  quantity: number  // Positive = add stock, Negative = remove stock
+  unit_cost?: number  // Required for positive quantities (purchases), unless it's an adjustment
+}
+
+export interface CreateTransactionsRequest {
+  transactions: StockTransaction[]
+  notes?: string
+}
+
+/**
+ * Create stock transactions (committee only)
+ */
+export async function createStockTransactions(request: CreateTransactionsRequest): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/stock/transactions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to create transactions')
+  }
+}

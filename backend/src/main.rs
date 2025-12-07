@@ -14,6 +14,7 @@ use routes::events::{get_events, get_event, create_event, update_event, delete_e
 use routes::shifts::{get_shifts, signup_for_shift, cancel_shift_signup, get_my_shifts, admin_remove_from_shift};
 use routes::calendar::{get_calendar_feed, download_event, get_user_calendar};
 use routes::local::generate_jwt;
+use routes::stock::{create_product, lookup_barcode, add_barcode, create_transactions, get_products};
 use sqlx::sqlite::SqlitePoolOptions;
 use std::net::SocketAddr;
 use tower_http::cors::{Any, CorsLayer};
@@ -25,10 +26,10 @@ async fn main() {
     // Initialize tracing
     tracing_subscriber::fmt::init();
 
-    // Setup database
+    // Setup database (create if it doesn't exist)
     let db = SqlitePoolOptions::new()
         .max_connections(5)
-        .connect("sqlite:wolfson_bar.db")
+        .connect("sqlite:wolfson_bar.db?mode=rwc")
         .await
         .expect("Failed to connect to database");
 
@@ -65,6 +66,18 @@ async fn main() {
             panic!("Failed to run calendar migration: {}", e);
         }
         tracing::info!("Calendar migration already applied (ignoring duplicate errors)");
+    }
+
+    // Run stock management migration (ignore duplicate errors for idempotency)
+    if let Err(e) = sqlx::query(&std::fs::read_to_string("migrations/005_stock.sql").expect("Failed to read migration"))
+        .execute(&db)
+        .await
+    {
+        // Ignore errors if already applied
+        if !e.to_string().contains("already exists") {
+            panic!("Failed to run stock migration: {}", e);
+        }
+        tracing::info!("Stock migration already applied (ignoring duplicate errors)");
     }
 
     // Get public URL from environment (required)
@@ -128,6 +141,11 @@ async fn main() {
         .route("/api/shifts/:date/signup", axum::routing::delete(cancel_shift_signup))
         .route("/api/users/me/shifts", get(get_my_shifts))
         .route("/api/admin/shifts/:date/:user_id", axum::routing::delete(admin_remove_from_shift))
+        .route("/api/admin/stock/products", get(get_products))
+        .route("/api/admin/stock/products/:id", post(create_product))
+        .route("/api/admin/stock/products/:id/barcodes", post(add_barcode))
+        .route("/api/admin/stock/barcode/:barcode", get(lookup_barcode))
+        .route("/api/admin/stock/transactions", post(create_transactions))
         // Localhost-only endpoints for development
         .route("/api/local/jwt/:user_id", get(generate_jwt))
         .layer(cors)

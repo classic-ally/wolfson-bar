@@ -6,6 +6,8 @@ import CommitteeLayout from './components/CommitteeLayout'
 import CommitteeOverview from './components/committee/CommitteeOverview'
 import CommitteeEvents from './components/committee/CommitteeEvents'
 import CommitteeHours from './components/committee/CommitteeHours'
+import CommitteeStock from './components/committee/CommitteeStock'
+import CommitteeStockUpdate from './components/committee/CommitteeStockUpdate'
 import CommitteeMembers from './components/committee/CommitteeMembers'
 import CommitteeInduction from './components/committee/CommitteeInduction'
 import OnboardingStatusBar from './components/OnboardingStatusBar'
@@ -272,6 +274,8 @@ function App() {
             <Route index element={<CommitteeOverview />} />
             <Route path="events" element={<CommitteeEvents />} />
             <Route path="hours" element={<CommitteeHours />} />
+            <Route path="stock" element={<CommitteeStock />} />
+            <Route path="stock/update" element={<CommitteeStockUpdate />} />
             <Route path="members" element={<CommitteeMembers />} />
             <Route path="induction" element={<CommitteeInduction />} />
           </Route>

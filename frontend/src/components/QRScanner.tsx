@@ -13,6 +13,8 @@ export default function QRScanner({ onScan, onClose }: QRScannerProps) {
   const qrCodeRegionId = 'qr-reader'
 
   useEffect(() => {
+    let isActive = true
+
     const startScanner = async () => {
       try {
         const html5QrCode = new Html5Qrcode(qrCodeRegionId)
@@ -25,38 +27,46 @@ export default function QRScanner({ onScan, onClose }: QRScannerProps) {
             qrbox: { width: 250, height: 250 },
           },
           (decodedText) => {
+            if (!isActive) return // Don't process if component is unmounting
             onScan(decodedText)
-            stopScanner()
           },
           () => {
             // Ignore decode errors (happens frequently as it scans)
           }
         )
 
-        setIsScanning(true)
+        if (isActive) {
+          setIsScanning(true)
+        }
       } catch (err) {
         console.error('Failed to start QR scanner:', err)
-        setError('Failed to access camera. Please grant camera permissions.')
+        if (isActive) {
+          setError('Failed to access camera. Please grant camera permissions.')
+        }
       }
     }
 
     startScanner()
 
     return () => {
+      isActive = false
       stopScanner()
     }
   }, [])
 
-  const stopScanner = () => {
-    if (scannerRef.current?.isScanning) {
-      scannerRef.current
-        .stop()
-        .then(() => {
-          setIsScanning(false)
-        })
-        .catch((err) => {
-          console.error('Failed to stop scanner:', err)
-        })
+  const stopScanner = async () => {
+    if (scannerRef.current) {
+      try {
+        const state = await scannerRef.current.getState()
+        if (state === 2) { // 2 = SCANNING state
+          await scannerRef.current.stop()
+        }
+        // Clear to fully release camera resources
+        await scannerRef.current.clear()
+        setIsScanning(false)
+      } catch (err) {
+        console.error('Failed to stop scanner:', err)
+      }
     }
   }
 

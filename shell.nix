@@ -17,7 +17,7 @@ pkgs.mkShell {
   OPENSSL_DIR = "${pkgs.openssl.dev}";
   OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
   OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include";
-  PUBLIC_URL = "http://localhost:3000";
+  PUBLIC_URL = "http://localhost:5173";
 
   shellHook = ''
     echo "🍺 Wolfson Bar Development Environment"

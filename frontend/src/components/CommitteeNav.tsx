@@ -7,6 +7,7 @@ export default function CommitteeNav() {
     { path: '/committee', label: 'Overview' },
     { path: '/committee/events', label: 'Events' },
     { path: '/committee/hours', label: 'Hours' },
+    { path: '/committee/stock', label: 'Stock' },
     { path: '/committee/members', label: 'Members' },
     { path: '/committee/induction', label: 'Induction' },
   ]
