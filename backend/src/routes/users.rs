@@ -1,6 +1,6 @@
 use axum::{
     extract::{State, Query},
-    http::{StatusCode, HeaderMap},
+    http::StatusCode,
     Json,
 };
 use axum_extra::extract::Multipart;
@@ -8,10 +8,9 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, error};
 use ts_rs::TS;
 use jsonwebtoken::{encode, EncodingKey, Header};
-use std::collections::HashMap;
 
-use crate::auth::{extract_user_id_from_header, Claims};
-use crate::models::{ErrorResponse, User};
+use crate::auth::{AuthenticatedUser, Claims};
+use crate::models::ErrorResponse;
 use crate::routes::auth::AppState;
 
 #[derive(Debug, Serialize, Deserialize, TS)]
@@ -48,38 +47,9 @@ pub struct UserOverview {
 
 // Get current user's status
 pub async fn get_me(
-    State(state): State<AppState>,
-    headers: HeaderMap,
+    AuthenticatedUser(user): AuthenticatedUser,
 ) -> Result<Json<UserStatus>, (StatusCode, Json<ErrorResponse>)> {
-    // Extract user ID from JWT
-    let auth_header = headers.get("authorization")
-        .and_then(|h| h.to_str().ok());
-
-    let user_id = extract_user_id_from_header(auth_header).ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: "Not authenticated".to_string(),
-            }),
-        )
-    })?;
-
-    info!("📊 Fetching status for user: {}", user_id);
-
-    // Get user from database
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
-        .bind(&user_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| {
-            error!("❌ Failed to fetch user: {}", e);
-            (
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "User not found".to_string(),
-                }),
-            )
-        })?;
+    info!("📊 Fetching status for user: {}", user.id);
 
     Ok(Json(UserStatus {
         user_id: user.id,
@@ -97,27 +67,14 @@ pub async fn get_me(
 // Accept Code of Conduct
 pub async fn accept_coc(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AuthenticatedUser(user): AuthenticatedUser,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    // Extract user ID from JWT
-    let auth_header = headers.get("authorization")
-        .and_then(|h| h.to_str().ok());
-
-    let user_id = extract_user_id_from_header(auth_header).ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: "Not authenticated".to_string(),
-            }),
-        )
-    })?;
-
-    info!("✍️ User {} accepting Code of Conduct", user_id);
+    info!("✍️ User {} accepting Code of Conduct", user.id);
 
     // Update user's CoC status
     sqlx::query("UPDATE users SET code_of_conduct_signed = ? WHERE id = ?")
         .bind(true)
-        .bind(&user_id)
+        .bind(&user.id)
         .execute(&state.db)
         .await
         .map_err(|e| {
@@ -130,7 +87,7 @@ pub async fn accept_coc(
             )
         })?;
 
-    info!("✅ Code of Conduct accepted for user: {}", user_id);
+    info!("✅ Code of Conduct accepted for user: {}", user.id);
 
     Ok(StatusCode::OK)
 }
@@ -138,39 +95,12 @@ pub async fn accept_coc(
 // Upload food safety certificate
 pub async fn upload_certificate(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AuthenticatedUser(user): AuthenticatedUser,
     mut multipart: Multipart,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    // Extract user ID from JWT
-    let auth_header = headers.get("authorization")
-        .and_then(|h| h.to_str().ok());
-
-    let user_id = extract_user_id_from_header(auth_header).ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: "Not authenticated".to_string(),
-            }),
-        )
-    })?;
-
-    info!("📤 User {} uploading food safety certificate", user_id);
+    info!("📤 User {} uploading food safety certificate", user.id);
 
     // Check if already approved
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
-        .bind(&user_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| {
-            error!("❌ Failed to fetch user: {}", e);
-            (
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "User not found".to_string(),
-                }),
-            )
-        })?;
-
     if user.food_safety_completed {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -243,13 +173,13 @@ pub async fn upload_certificate(
         "application/octet-stream".to_string()
     };
 
-    info!("📸 Storing certificate ({} bytes, type: {}) for user: {}", file_bytes.len(), stored_type, user_id);
+    info!("📸 Storing certificate ({} bytes, type: {}) for user: {}", file_bytes.len(), stored_type, user.id);
 
     // Store BLOB and content type in database
     sqlx::query("UPDATE users SET food_safety_certificate = ?, food_safety_certificate_type = ? WHERE id = ?")
         .bind(&file_bytes)
         .bind(&stored_type)
-        .bind(&user_id)
+        .bind(&user.id)
         .execute(&state.db)
         .await
         .map_err(|e| {
@@ -262,7 +192,7 @@ pub async fn upload_certificate(
             )
         })?;
 
-    info!("✅ Certificate uploaded for user: {}", user_id);
+    info!("✅ Certificate uploaded for user: {}", user.id);
 
     Ok(StatusCode::OK)
 }
@@ -270,22 +200,10 @@ pub async fn upload_certificate(
 /// Submit contract request with expiry date
 pub async fn submit_contract_request(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AuthenticatedUser(user): AuthenticatedUser,
     Json(req): Json<ContractRequest>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    let auth_header = headers.get("authorization")
-        .and_then(|h| h.to_str().ok());
-
-    let user_id = extract_user_id_from_header(auth_header).ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: "Not authenticated".to_string(),
-            }),
-        )
-    })?;
-
-    info!("📋 User {} requesting contract approval with expiry: {}", user_id, req.contract_expiry_date);
+    info!("📋 User {} requesting contract approval with expiry: {}", user.id, req.contract_expiry_date);
 
     // Validate date format
     if chrono::NaiveDate::parse_from_str(&req.contract_expiry_date, "%Y-%m-%d").is_err() {
@@ -298,20 +216,6 @@ pub async fn submit_contract_request(
     }
 
     // Check if already approved
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
-        .bind(&user_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| {
-            error!("❌ Failed to fetch user: {}", e);
-            (
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "User not found".to_string(),
-                }),
-            )
-        })?;
-
     if user.has_contract {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -324,7 +228,7 @@ pub async fn submit_contract_request(
     // Set expiry date (has_contract stays FALSE until committee approves)
     sqlx::query("UPDATE users SET contract_expiry_date = ? WHERE id = ?")
         .bind(&req.contract_expiry_date)
-        .bind(&user_id)
+        .bind(&user.id)
         .execute(&state.db)
         .await
         .map_err(|e| {
@@ -337,7 +241,7 @@ pub async fn submit_contract_request(
             )
         })?;
 
-    info!("✅ Contract request submitted for user: {}", user_id);
+    info!("✅ Contract request submitted for user: {}", user.id);
 
     Ok(StatusCode::OK)
 }
@@ -356,22 +260,9 @@ pub struct VerificationToken {
 
 // Generate verification token for QR code
 pub async fn get_verification_token(
-    State(_state): State<AppState>,
-    headers: HeaderMap,
+    AuthenticatedUser(user): AuthenticatedUser,
     Query(params): Query<VerificationQuery>,
 ) -> Result<Json<VerificationToken>, (StatusCode, Json<ErrorResponse>)> {
-    // Extract user ID from JWT
-    let auth_header = headers.get("authorization")
-        .and_then(|h| h.to_str().ok());
-
-    let user_id = extract_user_id_from_header(auth_header).ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: "Not authenticated".to_string(),
-            }),
-        )
-    })?;
 
     // Validate type
     if params.verification_type != "induction" && params.verification_type != "food_safety" {
@@ -383,7 +274,7 @@ pub async fn get_verification_token(
         ));
     }
 
-    info!("🎫 Generating {} verification token for user: {}", params.verification_type, user_id);
+    info!("🎫 Generating {} verification token for user: {}", params.verification_type, user.id);
 
     // Create claims with short expiry (5 minutes)
     let now = chrono::Utc::now().timestamp() as usize;
@@ -393,7 +284,7 @@ pub async fn get_verification_token(
         .timestamp() as usize;
 
     let claims = Claims {
-        sub: user_id.clone(),
+        sub: user.id.clone(),
         exp: expiration,
         iat: now,
     };
@@ -426,21 +317,9 @@ pub async fn get_verification_token(
 // Update display name
 pub async fn update_display_name(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AuthenticatedUser(user): AuthenticatedUser,
     Json(req): Json<UpdateDisplayNameRequest>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    // Extract user ID from JWT
-    let auth_header = headers.get("authorization")
-        .and_then(|h| h.to_str().ok());
-
-    let user_id = extract_user_id_from_header(auth_header).ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: "Not authenticated".to_string(),
-            }),
-        )
-    })?;
 
     // Validate display name
     let trimmed_name = req.display_name.trim();
@@ -462,12 +341,12 @@ pub async fn update_display_name(
         ));
     }
 
-    info!("✏️ User {} updating display name to: {}", user_id, trimmed_name);
+    info!("✏️ User {} updating display name to: {}", user.id, trimmed_name);
 
     // Update display name
     sqlx::query("UPDATE users SET display_name = ? WHERE id = ?")
         .bind(trimmed_name)
-        .bind(&user_id)
+        .bind(&user.id)
         .execute(&state.db)
         .await
         .map_err(|e| {
@@ -480,7 +359,7 @@ pub async fn update_display_name(
             )
         })?;
 
-    info!("✅ Display name updated for user: {}", user_id);
+    info!("✅ Display name updated for user: {}", user.id);
 
     Ok(StatusCode::OK)
 }
@@ -488,36 +367,9 @@ pub async fn update_display_name(
 // Get user overview for dashboard
 pub async fn get_my_overview(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AuthenticatedUser(user): AuthenticatedUser,
 ) -> Result<Json<UserOverview>, (StatusCode, Json<ErrorResponse>)> {
-    let auth_header = headers.get("authorization")
-        .and_then(|h| h.to_str().ok());
-
-    let user_id = extract_user_id_from_header(auth_header).ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: "Not authenticated".to_string(),
-            }),
-        )
-    })?;
-
-    info!("📊 Fetching overview for user: {}", user_id);
-
-    // Get user from database
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
-        .bind(&user_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| {
-            error!("❌ Failed to fetch user: {}", e);
-            (
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "User not found".to_string(),
-                }),
-            )
-        })?;
+    info!("📊 Fetching overview for user: {}", user.id);
 
     // Determine next onboarding step
     let next_onboarding_step = if !user.code_of_conduct_signed {
@@ -537,7 +389,7 @@ pub async fn get_my_overview(
          AND shift_date >= date('now')
          AND shift_date <= date('now', '+7 days')"
     )
-    .bind(&user_id)
+    .bind(&user.id)
     .fetch_one(&state.db)
     .await
     .unwrap_or(0);

@@ -5,6 +5,8 @@ const API_BASE = window.location.origin
 export interface AuthResponse {
   token: string
   user_id: string
+  is_committee: boolean
+  is_admin: boolean
 }
 
 export class AuthError extends Error {
@@ -57,6 +59,7 @@ export async function registerWithPasskey(displayName: string): Promise<AuthResp
     localStorage.setItem('auth_token', authResponse.token)
     localStorage.setItem('user_id', authResponse.user_id)
     localStorage.setItem('is_committee', authResponse.is_committee.toString())
+    localStorage.setItem('is_admin', authResponse.is_admin.toString())
 
     // Reload to reflect new auth state
     window.location.reload()
@@ -111,6 +114,7 @@ export async function loginWithPasskey(): Promise<AuthResponse> {
     localStorage.setItem('auth_token', authResponse.token)
     localStorage.setItem('user_id', authResponse.user_id)
     localStorage.setItem('is_committee', authResponse.is_committee.toString())
+    localStorage.setItem('is_admin', authResponse.is_admin.toString())
 
     // Reload to reflect new auth state
     window.location.reload()
@@ -131,6 +135,7 @@ export function logout(): void {
   localStorage.removeItem('auth_token')
   localStorage.removeItem('user_id')
   localStorage.removeItem('is_committee')
+  localStorage.removeItem('is_admin')
 
   // Reload to reflect logged out state
   window.location.reload()
@@ -162,6 +167,13 @@ export function getUserId(): string | null {
  */
 export function isCommittee(): boolean {
   return localStorage.getItem('is_committee') === 'true'
+}
+
+/**
+ * Check if user is admin
+ */
+export function isAdmin(): boolean {
+  return localStorage.getItem('is_admin') === 'true'
 }
 
 /**
@@ -739,5 +751,73 @@ export async function createStockTransactions(request: CreateTransactionsRequest
   if (!response.ok) {
     const error = await response.json()
     throw new AuthError(error.error || 'Failed to create transactions')
+  }
+}
+
+// ===== Admin User Management (admin only) =====
+
+export interface UserListItem {
+  id: string
+  display_name: string | null
+  is_committee: boolean
+  is_admin: boolean
+  created_at: string
+}
+
+/**
+ * Get all users (admin only)
+ */
+export async function getAllUsers(): Promise<UserListItem[]> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/users`)
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to fetch users')
+  }
+
+  return response.json()
+}
+
+/**
+ * Promote a user (admin only)
+ * user -> committee -> admin
+ */
+export async function promoteUser(userId: string): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/users/${userId}/promote`, {
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to promote user')
+  }
+}
+
+/**
+ * Demote a user (admin only)
+ * admin -> committee -> user
+ */
+export async function demoteUser(userId: string): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/users/${userId}/demote`, {
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to demote user')
+  }
+}
+
+/**
+ * Delete a user (admin only)
+ */
+export async function deleteUser(userId: string): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/users/${userId}`, {
+    method: 'DELETE',
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to delete user')
   }
 }

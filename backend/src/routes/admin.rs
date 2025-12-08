@@ -1,15 +1,15 @@
 use axum::{
     extract::{State, Path},
-    http::{StatusCode, HeaderMap, header},
+    http::{StatusCode, header},
     Json,
-    response::{Response, IntoResponse},
+    response::Response,
     body::Body,
 };
 use serde::{Deserialize, Serialize};
 use tracing::{info, error};
 use ts_rs::TS;
 
-use crate::auth::extract_user_id_from_header;
+use crate::auth::{CommitteeUser, AdminUser};
 use crate::models::{ErrorResponse, User};
 use crate::routes::auth::AppState;
 
@@ -46,46 +46,9 @@ pub struct VerificationRequest {
 // Get all pending food safety certificates (committee only)
 pub async fn get_pending_certificates(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    CommitteeUser(user): CommitteeUser,
 ) -> Result<Json<Vec<PendingCertificate>>, (StatusCode, Json<ErrorResponse>)> {
-    // Extract user ID from JWT
-    let auth_header = headers.get("authorization")
-        .and_then(|h| h.to_str().ok());
-
-    let user_id = extract_user_id_from_header(auth_header).ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: "Not authenticated".to_string(),
-            }),
-        )
-    })?;
-
-    // Check if user is committee
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
-        .bind(&user_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| {
-            error!("❌ Failed to fetch user: {}", e);
-            (
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "User not found".to_string(),
-                }),
-            )
-        })?;
-
-    if !user.is_committee {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(ErrorResponse {
-                error: "Committee access required".to_string(),
-            }),
-        ));
-    }
-
-    info!("📋 Committee member {} fetching pending certificates", user_id);
+    info!("📋 Committee member {} fetching pending certificates", user.id);
 
     // Get users with uploaded but not approved certificates
     let pending_users = sqlx::query_as::<_, User>(
@@ -121,47 +84,10 @@ pub async fn get_pending_certificates(
 // Get certificate image for a specific user (committee only)
 pub async fn get_certificate(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    CommitteeUser(user): CommitteeUser,
     Path(target_user_id): Path<String>,
 ) -> Result<Response, (StatusCode, Json<ErrorResponse>)> {
-    // Extract user ID from JWT
-    let auth_header = headers.get("authorization")
-        .and_then(|h| h.to_str().ok());
-
-    let user_id = extract_user_id_from_header(auth_header).ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: "Not authenticated".to_string(),
-            }),
-        )
-    })?;
-
-    // Check if user is committee
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
-        .bind(&user_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| {
-            error!("❌ Failed to fetch user: {}", e);
-            (
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "User not found".to_string(),
-                }),
-            )
-        })?;
-
-    if !user.is_committee {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(ErrorResponse {
-                error: "Committee access required".to_string(),
-            }),
-        ));
-    }
-
-    info!("🖼️ Committee member {} viewing certificate for user {}", user_id, target_user_id);
+    info!("🖼️ Committee member {} viewing certificate for user {}", user.id, target_user_id);
 
     // Get target user's certificate
     let target_user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
@@ -202,47 +128,10 @@ pub async fn get_certificate(
 // Approve food safety certificate (committee only)
 pub async fn approve_certificate(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    CommitteeUser(user): CommitteeUser,
     Path(target_user_id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    // Extract user ID from JWT
-    let auth_header = headers.get("authorization")
-        .and_then(|h| h.to_str().ok());
-
-    let user_id = extract_user_id_from_header(auth_header).ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: "Not authenticated".to_string(),
-            }),
-        )
-    })?;
-
-    // Check if user is committee
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
-        .bind(&user_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| {
-            error!("❌ Failed to fetch user: {}", e);
-            (
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "User not found".to_string(),
-                }),
-            )
-        })?;
-
-    if !user.is_committee {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(ErrorResponse {
-                error: "Committee access required".to_string(),
-            }),
-        ));
-    }
-
-    info!("✅ Committee member {} approving certificate for user {}", user_id, target_user_id);
+    info!("✅ Committee member {} approving certificate for user {}", user.id, target_user_id);
 
     // Mark certificate as approved (keep BLOB for audit trail)
     sqlx::query("UPDATE users SET food_safety_completed = ? WHERE id = ?")
@@ -268,48 +157,11 @@ pub async fn approve_certificate(
 // Verify induction via QR code (committee only)
 pub async fn verify_induction(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    CommitteeUser(committee_user): CommitteeUser,
     Json(body): Json<VerificationRequest>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
     use jsonwebtoken::{decode, DecodingKey, Validation};
     use crate::auth::Claims;
-
-    // Extract committee user ID from JWT
-    let auth_header = headers.get("authorization")
-        .and_then(|h| h.to_str().ok());
-
-    let committee_user_id = extract_user_id_from_header(auth_header).ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: "Not authenticated".to_string(),
-            }),
-        )
-    })?;
-
-    // Check if user is committee
-    let committee_user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
-        .bind(&committee_user_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| {
-            error!("❌ Failed to fetch committee user: {}", e);
-            (
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "User not found".to_string(),
-                }),
-            )
-        })?;
-
-    if !committee_user.is_committee {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(ErrorResponse {
-                error: "Committee access required".to_string(),
-            }),
-        ));
-    }
 
     // Parse token format "induction:JWT"
     let parts: Vec<&str> = body.token.split(':').collect();
@@ -353,7 +205,7 @@ pub async fn verify_induction(
 
     let target_user_id = token_data.claims.sub;
 
-    info!("✅ Committee member {} verifying induction for user {}", committee_user_id, target_user_id);
+    info!("✅ Committee member {} verifying induction for user {}", committee_user.id, target_user_id);
 
     // Mark induction as completed
     sqlx::query("UPDATE users SET induction_completed = ? WHERE id = ?")
@@ -379,46 +231,9 @@ pub async fn verify_induction(
 // Get all active members (committee only)
 pub async fn get_active_members(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    CommitteeUser(user): CommitteeUser,
 ) -> Result<Json<Vec<ActiveMember>>, (StatusCode, Json<ErrorResponse>)> {
-    // Extract user ID from JWT
-    let auth_header = headers.get("authorization")
-        .and_then(|h| h.to_str().ok());
-
-    let user_id = extract_user_id_from_header(auth_header).ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: "Not authenticated".to_string(),
-            }),
-        )
-    })?;
-
-    // Check if user is committee
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
-        .bind(&user_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| {
-            error!("❌ Failed to fetch user: {}", e);
-            (
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "User not found".to_string(),
-                }),
-            )
-        })?;
-
-    if !user.is_committee {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(ErrorResponse {
-                error: "Committee access required".to_string(),
-            }),
-        ));
-    }
-
-    info!("👥 Committee member {} fetching active members", user_id);
+    info!("👥 Committee member {} fetching active members", user.id);
 
     // Get users who are fully onboarded (active members)
     let active_users = sqlx::query_as::<_, User>(
@@ -459,45 +274,9 @@ pub async fn get_active_members(
 /// Get all pending contract requests (committee only)
 pub async fn get_pending_contracts(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    CommitteeUser(user): CommitteeUser,
 ) -> Result<Json<Vec<PendingContract>>, (StatusCode, Json<ErrorResponse>)> {
-    let auth_header = headers.get("authorization")
-        .and_then(|h| h.to_str().ok());
-
-    let user_id = extract_user_id_from_header(auth_header).ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: "Not authenticated".to_string(),
-            }),
-        )
-    })?;
-
-    info!("📋 Fetching pending contracts for committee user: {}", user_id);
-
-    // Verify committee status
-    let requesting_user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
-        .bind(&user_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| {
-            error!("❌ Failed to fetch requesting user: {}", e);
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(ErrorResponse {
-                    error: "Not authenticated".to_string(),
-                }),
-            )
-        })?;
-
-    if !requesting_user.is_committee {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(ErrorResponse {
-                error: "Only committee members can view pending contracts".to_string(),
-            }),
-        ));
-    }
+    info!("📋 Fetching pending contracts for committee user: {}", user.id);
 
     // Get users with pending contracts (has expiry date but not approved)
     let pending_users = sqlx::query_as::<_, User>(
@@ -535,46 +314,10 @@ pub async fn get_pending_contracts(
 /// Approve a contract (committee only)
 pub async fn approve_contract(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    CommitteeUser(user): CommitteeUser,
     Path(target_user_id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    let auth_header = headers.get("authorization")
-        .and_then(|h| h.to_str().ok());
-
-    let user_id = extract_user_id_from_header(auth_header).ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: "Not authenticated".to_string(),
-            }),
-        )
-    })?;
-
-    info!("✅ Committee user {} approving contract for user: {}", user_id, target_user_id);
-
-    // Verify committee status
-    let requesting_user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
-        .bind(&user_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| {
-            error!("❌ Failed to fetch requesting user: {}", e);
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(ErrorResponse {
-                    error: "Not authenticated".to_string(),
-                }),
-            )
-        })?;
-
-    if !requesting_user.is_committee {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(ErrorResponse {
-                error: "Only committee members can approve contracts".to_string(),
-            }),
-        ));
-    }
+    info!("✅ Committee user {} approving contract for user: {}", user.id, target_user_id);
 
     // Approve the contract
     sqlx::query("UPDATE users SET has_contract = TRUE WHERE id = ?")
@@ -615,41 +358,8 @@ pub struct UpdateBarHoursRequest {
 /// Get all bar hours (committee only)
 pub async fn get_bar_hours(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    CommitteeUser(_user): CommitteeUser,
 ) -> Result<Json<Vec<BarHours>>, (StatusCode, Json<ErrorResponse>)> {
-    let auth_header = headers.get("authorization").and_then(|h| h.to_str().ok());
-    let user_id = extract_user_id_from_header(auth_header).ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: "Not authenticated".to_string(),
-            }),
-        )
-    })?;
-
-    // Check if user is committee
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
-        .bind(&user_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|_| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "User not found".to_string(),
-                }),
-            )
-        })?;
-
-    if !user.is_committee {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(ErrorResponse {
-                error: "Committee access required".to_string(),
-            }),
-        ));
-    }
-
     // Fetch bar hours
     let hours = sqlx::query_as::<_, BarHours>(
         "SELECT day_of_week, open_time, close_time FROM bar_hours ORDER BY day_of_week"
@@ -672,42 +382,9 @@ pub async fn get_bar_hours(
 /// Update bar hours for a specific day (committee only)
 pub async fn update_bar_hours(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    CommitteeUser(_user): CommitteeUser,
     Json(req): Json<UpdateBarHoursRequest>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    let auth_header = headers.get("authorization").and_then(|h| h.to_str().ok());
-    let user_id = extract_user_id_from_header(auth_header).ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: "Not authenticated".to_string(),
-            }),
-        )
-    })?;
-
-    // Check if user is committee
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
-        .bind(&user_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|_| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "User not found".to_string(),
-                }),
-            )
-        })?;
-
-    if !user.is_committee {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(ErrorResponse {
-                error: "Committee access required".to_string(),
-            }),
-        ));
-    }
-
     // Validate day of week (0-6)
     if req.day_of_week < 0 || req.day_of_week > 6 {
         return Err((
@@ -773,41 +450,8 @@ pub struct OverviewStats {
 /// Get dashboard overview stats (committee only)
 pub async fn get_overview_stats(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    CommitteeUser(_user): CommitteeUser,
 ) -> Result<Json<OverviewStats>, (StatusCode, Json<ErrorResponse>)> {
-    let auth_header = headers.get("authorization").and_then(|h| h.to_str().ok());
-    let user_id = extract_user_id_from_header(auth_header).ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: "Not authenticated".to_string(),
-            }),
-        )
-    })?;
-
-    // Check if user is committee
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
-        .bind(&user_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|_| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "User not found".to_string(),
-                }),
-            )
-        })?;
-
-    if !user.is_committee {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(ErrorResponse {
-                error: "Committee access required".to_string(),
-            }),
-        ));
-    }
-
     // Get active members count
     let active_members_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM users
@@ -885,4 +529,275 @@ pub async fn get_overview_stats(
         understaffed_events_next_7_days,
         expiring_contracts_next_30_days,
     }))
+}
+
+// ===== Admin-only endpoints (user management) =====
+
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../frontend/src/types/")]
+pub struct UserListItem {
+    pub id: String,
+    pub display_name: Option<String>,
+    pub is_committee: bool,
+    pub is_admin: bool,
+    pub created_at: String,
+}
+
+/// Get all users (admin only)
+/// Returns users sorted by: admins first, then committee, then regular users
+pub async fn get_all_users(
+    State(state): State<AppState>,
+    AdminUser(user): AdminUser,
+) -> Result<Json<Vec<UserListItem>>, (StatusCode, Json<ErrorResponse>)> {
+    info!("👥 Admin {} fetching all users", user.id);
+
+    // Fetch all users, sorted by admin first, then committee, then regular
+    let users = sqlx::query_as::<_, User>(
+        "SELECT * FROM users ORDER BY is_admin DESC, is_committee DESC, display_name ASC"
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        error!("❌ Failed to fetch users: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "Failed to fetch users".to_string(),
+            }),
+        )
+    })?;
+
+    let user_list: Vec<UserListItem> = users
+        .into_iter()
+        .map(|u| UserListItem {
+            id: u.id,
+            display_name: u.display_name,
+            is_committee: u.is_committee,
+            is_admin: u.is_admin,
+            created_at: u.created_at,
+        })
+        .collect();
+
+    info!("✅ Found {} users", user_list.len());
+
+    Ok(Json(user_list))
+}
+
+/// Promote a user (admin only)
+/// user -> committee -> admin
+pub async fn promote_user(
+    State(state): State<AppState>,
+    AdminUser(_admin): AdminUser,
+    Path(target_user_id): Path<String>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    // Fetch target user
+    let target_user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+        .bind(&target_user_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: "Target user not found".to_string(),
+                }),
+            )
+        })?;
+
+    // Determine new role
+    if target_user.is_admin {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "User is already an admin".to_string(),
+            }),
+        ));
+    }
+
+    if target_user.is_committee {
+        // Promote committee -> admin
+        info!("⬆️ Promoting user {} to admin", target_user_id);
+        sqlx::query("UPDATE users SET is_admin = TRUE WHERE id = ?")
+            .bind(&target_user_id)
+            .execute(&state.db)
+            .await
+            .map_err(|e| {
+                error!("❌ Failed to promote user: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: "Failed to promote user".to_string(),
+                    }),
+                )
+            })?;
+    } else {
+        // Promote regular user -> committee
+        info!("⬆️ Promoting user {} to committee", target_user_id);
+        sqlx::query("UPDATE users SET is_committee = TRUE WHERE id = ?")
+            .bind(&target_user_id)
+            .execute(&state.db)
+            .await
+            .map_err(|e| {
+                error!("❌ Failed to promote user: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: "Failed to promote user".to_string(),
+                    }),
+                )
+            })?;
+    }
+
+    Ok(StatusCode::OK)
+}
+
+/// Demote a user (admin only)
+/// admin -> committee -> user
+/// Blocked if demoting the last admin
+pub async fn demote_user(
+    State(state): State<AppState>,
+    AdminUser(_admin): AdminUser,
+    Path(target_user_id): Path<String>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    // Fetch target user
+    let target_user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+        .bind(&target_user_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: "Target user not found".to_string(),
+                }),
+            )
+        })?;
+
+    // Check if trying to demote the last admin
+    if target_user.is_admin {
+        let admin_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE is_admin = TRUE")
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or(0);
+
+        if admin_count <= 1 {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "Cannot demote the last admin".to_string(),
+                }),
+            ));
+        }
+
+        // Demote admin -> committee
+        info!("⬇️ Demoting admin {} to committee", target_user_id);
+        sqlx::query("UPDATE users SET is_admin = FALSE WHERE id = ?")
+            .bind(&target_user_id)
+            .execute(&state.db)
+            .await
+            .map_err(|e| {
+                error!("❌ Failed to demote user: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: "Failed to demote user".to_string(),
+                    }),
+                )
+            })?;
+    } else if target_user.is_committee {
+        // Demote committee -> regular user
+        info!("⬇️ Demoting committee {} to regular user", target_user_id);
+        sqlx::query("UPDATE users SET is_committee = FALSE WHERE id = ?")
+            .bind(&target_user_id)
+            .execute(&state.db)
+            .await
+            .map_err(|e| {
+                error!("❌ Failed to demote user: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: "Failed to demote user".to_string(),
+                    }),
+                )
+            })?;
+    } else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "User is already a regular user".to_string(),
+            }),
+        ));
+    }
+
+    Ok(StatusCode::OK)
+}
+
+/// Delete a user (admin only)
+/// Cannot delete yourself or the last admin
+pub async fn delete_user(
+    State(state): State<AppState>,
+    AdminUser(admin): AdminUser,
+    Path(target_user_id): Path<String>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    // Cannot delete yourself
+    if admin.id == target_user_id {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "Cannot delete yourself".to_string(),
+            }),
+        ));
+    }
+
+    // Fetch target user
+    let target_user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+        .bind(&target_user_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: "Target user not found".to_string(),
+                }),
+            )
+        })?;
+
+    // Cannot delete the last admin
+    if target_user.is_admin {
+        let admin_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE is_admin = TRUE")
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or(0);
+
+        if admin_count <= 1 {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "Cannot delete the last admin".to_string(),
+                }),
+            ));
+        }
+    }
+
+    info!("🗑️ Admin {} deleting user {}", admin.id, target_user_id);
+
+    // Delete the user
+    sqlx::query("DELETE FROM users WHERE id = ?")
+        .bind(&target_user_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            error!("❌ Failed to delete user: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to delete user".to_string(),
+                }),
+            )
+        })?;
+
+    info!("✅ User {} deleted", target_user_id);
+
+    Ok(StatusCode::OK)
 }

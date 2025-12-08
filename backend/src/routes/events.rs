@@ -34,35 +34,54 @@ pub struct UpdateEventRequest {
     pub shift_requires_contract: Option<bool>,
 }
 
-// Get all upcoming events (public endpoint)
+// Get events (public endpoint)
 pub async fn get_events(
     State(state): State<AppState>,
     Query(params): Query<EventsQuery>,
 ) -> Result<Json<Vec<Event>>, (StatusCode, Json<ErrorResponse>)> {
     info!("📅 Fetching events with filters: {:?}", params);
 
-    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    let start_date = params.start_date.unwrap_or(today);
-
-    let events = if let Some(end_date) = params.end_date {
-        // Query with both start and end date
-        info!("📅 Fetching events between {} and {}", start_date, end_date);
-        sqlx::query_as::<_, Event>(
-            "SELECT * FROM events WHERE event_date >= ? AND event_date <= ? ORDER BY event_date ASC"
-        )
-        .bind(&start_date)
-        .bind(&end_date)
-        .fetch_all(&state.db)
-        .await
-    } else {
-        // Query with only start date (all future events)
-        info!("📅 Fetching events from {} onwards", start_date);
-        sqlx::query_as::<_, Event>(
-            "SELECT * FROM events WHERE event_date >= ? ORDER BY event_date ASC"
-        )
-        .bind(&start_date)
-        .fetch_all(&state.db)
-        .await
+    let events = match (params.start_date, params.end_date) {
+        (Some(start_date), Some(end_date)) => {
+            // Query with both start and end date
+            info!("📅 Fetching events between {} and {}", start_date, end_date);
+            sqlx::query_as::<_, Event>(
+                "SELECT * FROM events WHERE event_date >= ? AND event_date <= ? ORDER BY event_date ASC"
+            )
+            .bind(&start_date)
+            .bind(&end_date)
+            .fetch_all(&state.db)
+            .await
+        }
+        (Some(start_date), None) => {
+            // Query with only start date (from start onwards)
+            info!("📅 Fetching events from {} onwards", start_date);
+            sqlx::query_as::<_, Event>(
+                "SELECT * FROM events WHERE event_date >= ? ORDER BY event_date ASC"
+            )
+            .bind(&start_date)
+            .fetch_all(&state.db)
+            .await
+        }
+        (None, Some(end_date)) => {
+            // Query with only end date (up to end)
+            info!("📅 Fetching events up to {}", end_date);
+            sqlx::query_as::<_, Event>(
+                "SELECT * FROM events WHERE event_date <= ? ORDER BY event_date ASC"
+            )
+            .bind(&end_date)
+            .fetch_all(&state.db)
+            .await
+        }
+        (None, None) => {
+            // No date filters - fetch all events
+            info!("📅 Fetching all events");
+            sqlx::query_as::<_, Event>(
+                "SELECT * FROM events ORDER BY event_date ASC"
+            )
+            .fetch_all(&state.db)
+            .await
+        }
     }
     .map_err(|e| {
         error!("❌ Failed to fetch events: {}", e);

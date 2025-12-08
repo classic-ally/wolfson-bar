@@ -16,6 +16,7 @@ pub struct AuthResponse {
     pub token: String,
     pub user_id: String,
     pub is_committee: bool,
+    pub is_admin: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, TS)]
@@ -31,6 +32,8 @@ pub struct User {
     pub display_name: Option<String>,
     pub passkey_credential: String,
     pub is_committee: bool,
+    #[sqlx(default)]
+    pub is_admin: bool,
     pub code_of_conduct_signed: bool,
     pub food_safety_completed: bool,
     #[sqlx(default)]
@@ -63,12 +66,13 @@ pub struct Event {
 }
 
 impl User {
-    pub fn new(display_name: Option<String>, passkey_credential: String, is_committee: bool) -> Self {
+    pub fn new(display_name: Option<String>, passkey_credential: String, is_committee: bool, is_admin: bool) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
             display_name,
             passkey_credential,
             is_committee,
+            is_admin,
             code_of_conduct_signed: false,
             food_safety_completed: false,
             food_safety_certificate: None,

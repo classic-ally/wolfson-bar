@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { registerWithPasskey, loginWithPasskey, isLoggedIn, logout, getUserStatus, isCommittee } from '../lib/auth'
+import { registerWithPasskey, loginWithPasskey, isLoggedIn, logout, getUserStatus, isCommittee, isAdmin } from '../lib/auth'
 
 export function LoginButton() {
   const [isLoading, setIsLoading] = useState(false)
@@ -166,6 +166,22 @@ export function LoginButton() {
                     onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'white'}
                   >
                     Committee
+                  </button>
+                )}
+                {isAdmin() && (
+                  <button
+                    onClick={() => {
+                      setShowMenu(false)
+                      navigate('/admin')
+                    }}
+                    style={{
+                      ...menuItemStyle,
+                      borderBottom: '1px solid #eee'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f5f5'}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'white'}
+                  >
+                    Admin
                   </button>
                 )}
                 <button

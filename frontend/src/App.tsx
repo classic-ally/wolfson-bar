@@ -4,6 +4,8 @@ import './App.css'
 import { usePageTitle } from './hooks/usePageTitle'
 import { LoginButton } from './components/LoginButton'
 import CommitteeLayout from './components/CommitteeLayout'
+import AdminLayout from './components/AdminLayout'
+import AdminUsers from './components/admin/AdminUsers'
 import CommitteeOverview from './components/committee/CommitteeOverview'
 import CommitteeEvents from './components/committee/CommitteeEvents'
 import CommitteeHours from './components/committee/CommitteeHours'
@@ -24,10 +26,15 @@ import ShiftDetailModal from './components/ShiftDetailModal'
 import ProtectedRoute from './components/ProtectedRoute'
 import { isLoggedIn, getEvents, Event, getShifts, ShiftInfo, getUserStatus, UserStatus } from './lib/auth'
 
-// Michaelmas 2025 term dates
-const MICHAELMAS_2025 = {
-  start: '2025-10-06',
-  end: '2025-12-06'
+// Helper to get date range for events (3 months before to 3 months after current month)
+function getEventsDateRange() {
+  const now = new Date()
+  const start = new Date(now.getFullYear(), now.getMonth() - 3, 1)
+  const end = new Date(now.getFullYear(), now.getMonth() + 4, 0)
+  return {
+    start: start.toISOString().split('T')[0],
+    end: end.toISOString().split('T')[0]
+  }
 }
 
 function Header() {
@@ -123,7 +130,7 @@ function EventsPage() {
   const [eventsLoading, setEventsLoading] = useState(false)
   const [selectedShift, setSelectedShift] = useState<ShiftInfo | null>(null)
   const [userStatus, setUserStatus] = useState<UserStatus | null>(null)
-  usePageTitle('Events')
+  usePageTitle('Events Calendar')
 
   useEffect(() => {
     loadEvents()
@@ -145,7 +152,8 @@ function EventsPage() {
   const loadEvents = async () => {
     setEventsLoading(true)
     try {
-      const fetchedEvents = await getEvents(MICHAELMAS_2025.start, MICHAELMAS_2025.end)
+      const dateRange = getEventsDateRange()
+      const fetchedEvents = await getEvents(dateRange.start, dateRange.end)
       setEvents(fetchedEvents)
     } catch (err) {
       console.error('Failed to load events:', err)
@@ -156,7 +164,8 @@ function EventsPage() {
 
   const loadShifts = async () => {
     try {
-      const fetchedShifts = await getShifts(MICHAELMAS_2025.start, MICHAELMAS_2025.end)
+      const dateRange = getEventsDateRange()
+      const fetchedShifts = await getShifts(dateRange.start, dateRange.end)
       setShifts(fetchedShifts)
     } catch (err) {
       console.error('Failed to load shifts:', err)
@@ -201,7 +210,7 @@ function EventsPage() {
 
   return (
     <main className="content events-page">
-      <h1 className="page-header" style={{ marginBottom: '20px' }}>Michaelmas 2025 Term Card</h1>
+      <h1 className="page-header" style={{ marginBottom: '20px' }}>Events Calendar</h1>
 
       {isLoggedIn() && userStatus && (
         <div style={{ padding: '10px 20px', backgroundColor: '#e7f3ff', borderRadius: '4px', marginBottom: '20px' }}>
@@ -231,15 +240,10 @@ function EventsPage() {
           selectable={isLoggedIn()}
           onSelectSlot={(slotInfo) => handleDateClick(slotInfo.start)}
           onSelectEvent={(event) => handleDateClick(event.start)}
-          defaultDate={new Date('2025-10-06')}
+          defaultDate={new Date()}
           defaultView="month"
-          agendaLength={62}
         />
       )}
-
-      <div className="term-card-image" style={{ marginTop: '40px' }}>
-        <img src="/term-card.jpeg" alt="Michaelmas 2025 Term Card" />
-      </div>
 
       <ShiftDetailModal
         shift={selectedShift}
@@ -281,6 +285,9 @@ function App() {
             <Route path="stock/update" element={<CommitteeStockUpdate />} />
             <Route path="members" element={<CommitteeMembers />} />
             <Route path="induction" element={<CommitteeInduction />} />
+          </Route>
+          <Route path="/admin" element={<AdminLayout />}>
+            <Route index element={<AdminUsers />} />
           </Route>
         </Routes>
       </div>

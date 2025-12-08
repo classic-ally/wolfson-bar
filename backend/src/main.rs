@@ -10,7 +10,7 @@ use axum::{
 };
 use routes::auth::{login_finish, login_start, register_finish, register_start, AppState};
 use routes::users::{get_me, accept_coc, upload_certificate, get_verification_token, update_display_name, submit_contract_request, get_my_overview};
-use routes::admin::{get_pending_certificates, get_certificate, approve_certificate, verify_induction, get_active_members, get_pending_contracts, approve_contract, get_bar_hours, update_bar_hours, get_overview_stats};
+use routes::admin::{get_pending_certificates, get_certificate, approve_certificate, verify_induction, get_active_members, get_pending_contracts, approve_contract, get_bar_hours, update_bar_hours, get_overview_stats, get_all_users, promote_user, demote_user, delete_user};
 use routes::events::{get_events, get_event, create_event, update_event, delete_event};
 use routes::shifts::{get_shifts, signup_for_shift, cancel_shift_signup, get_my_shifts, admin_remove_from_shift};
 use routes::calendar::{get_calendar_feed, download_event, get_user_calendar};
@@ -93,6 +93,18 @@ async fn main() {
         tracing::info!("Certificate type migration already applied (ignoring duplicate errors)");
     }
 
+    // Run admin role migration (ignore duplicate errors for idempotency)
+    if let Err(e) = sqlx::query(&std::fs::read_to_string("migrations/007_admin_role.sql").expect("Failed to read migration"))
+        .execute(&db)
+        .await
+    {
+        // Ignore errors if already applied
+        if !e.to_string().contains("duplicate column") {
+            panic!("Failed to run admin role migration: {}", e);
+        }
+        tracing::info!("Admin role migration already applied (ignoring duplicate errors)");
+    }
+
     // Get public URL from environment (required)
     let public_url = std::env::var("PUBLIC_URL")
         .expect("PUBLIC_URL environment variable must be set");
@@ -160,6 +172,11 @@ async fn main() {
         .route("/api/admin/stock/products/:id/barcodes", post(add_barcode))
         .route("/api/admin/stock/barcode/:barcode", get(lookup_barcode))
         .route("/api/admin/stock/transactions", post(create_transactions))
+        // Admin user management routes
+        .route("/api/admin/users", get(get_all_users))
+        .route("/api/admin/users/:user_id/promote", post(promote_user))
+        .route("/api/admin/users/:user_id/demote", post(demote_user))
+        .route("/api/admin/users/:user_id", axum::routing::delete(delete_user))
         // Localhost-only endpoints for development
         .route("/api/local/jwt/:user_id", get(generate_jwt))
         .layer(cors)

@@ -1,14 +1,14 @@
 use axum::{
     extract::{State, Path, Query},
-    http::{StatusCode, HeaderMap},
+    http::StatusCode,
     Json,
 };
 use serde::{Deserialize, Serialize};
 use tracing::{info, error};
 use ts_rs::TS;
 
-use crate::auth::extract_user_id_from_header;
-use crate::models::{ErrorResponse, User};
+use crate::auth::{AuthenticatedUser, CommitteeUser};
+use crate::models::ErrorResponse;
 use crate::routes::auth::AppState;
 use crate::constants::{DEFAULT_SHIFT_MAX_VOLUNTEERS, DEFAULT_SHIFT_REQUIRES_CONTRACT};
 
@@ -45,30 +45,12 @@ pub struct UserShift {
     pub event_title: Option<String>,
 }
 
-// Helper function to extract user ID from auth token
-fn get_user_id_from_headers(headers: &HeaderMap) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
-    let auth_header = headers
-        .get("authorization")
-        .and_then(|h| h.to_str().ok());
-
-    extract_user_id_from_header(auth_header).ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: "Not authenticated".to_string(),
-            }),
-        )
-    })
-}
-
 // Get shift information for a date range (authenticated)
 pub async fn get_shifts(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AuthenticatedUser(_user): AuthenticatedUser,
     Query(params): Query<ShiftsQuery>,
 ) -> Result<Json<Vec<ShiftInfo>>, (StatusCode, Json<ErrorResponse>)> {
-    let _user_id = get_user_id_from_headers(&headers)?;
-
     info!("📋 Fetching shifts from {} to {}", params.start_date, params.end_date);
 
     // Generate all dates in range
@@ -224,12 +206,10 @@ pub async fn get_shifts(
 // Sign up for a shift (authenticated)
 pub async fn signup_for_shift(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AuthenticatedUser(user): AuthenticatedUser,
     Path(date): Path<String>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    let user_id = get_user_id_from_headers(&headers)?;
-
-    info!("➕ User {} signing up for shift on {}", user_id, date);
+    info!("➕ User {} signing up for shift on {}", user.id, date);
 
     // Validate date format
     chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
@@ -238,21 +218,6 @@ pub async fn signup_for_shift(
                 StatusCode::BAD_REQUEST,
                 Json(ErrorResponse {
                     error: "Invalid date format".to_string(),
-                }),
-            )
-        })?;
-
-    // Get user to check eligibility
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
-        .bind(&user_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| {
-            error!("❌ Failed to fetch user: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: "Failed to fetch user".to_string(),
                 }),
             )
         })?;
@@ -390,7 +355,7 @@ pub async fn signup_for_shift(
     // Insert signup
     sqlx::query("INSERT INTO shift_signups (shift_date, user_id) VALUES (?, ?)")
         .bind(&date)
-        .bind(&user_id)
+        .bind(&user.id)
         .execute(&state.db)
         .await
         .map_err(|e| {
@@ -412,23 +377,21 @@ pub async fn signup_for_shift(
             }
         })?;
 
-    info!("✅ User {} signed up for shift on {}", user_id, date);
+    info!("✅ User {} signed up for shift on {}", user.id, date);
     Ok(StatusCode::OK)
 }
 
 // Cancel shift signup (authenticated)
 pub async fn cancel_shift_signup(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AuthenticatedUser(user): AuthenticatedUser,
     Path(date): Path<String>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    let user_id = get_user_id_from_headers(&headers)?;
-
-    info!("🗑️ User {} cancelling signup for shift on {}", user_id, date);
+    info!("🗑️ User {} cancelling signup for shift on {}", user.id, date);
 
     let result = sqlx::query("DELETE FROM shift_signups WHERE shift_date = ? AND user_id = ?")
         .bind(&date)
-        .bind(&user_id)
+        .bind(&user.id)
         .execute(&state.db)
         .await
         .map_err(|e| {
@@ -450,18 +413,16 @@ pub async fn cancel_shift_signup(
         ));
     }
 
-    info!("✅ User {} cancelled signup for shift on {}", user_id, date);
+    info!("✅ User {} cancelled signup for shift on {}", user.id, date);
     Ok(StatusCode::OK)
 }
 
 // Get user's upcoming shifts (authenticated)
 pub async fn get_my_shifts(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AuthenticatedUser(user): AuthenticatedUser,
 ) -> Result<Json<Vec<UserShift>>, (StatusCode, Json<ErrorResponse>)> {
-    let user_id = get_user_id_from_headers(&headers)?;
-
-    info!("📋 Fetching shifts for user {}", user_id);
+    info!("📋 Fetching shifts for user {}", user.id);
 
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
 
@@ -478,7 +439,7 @@ pub async fn get_my_shifts(
          WHERE ss.user_id = ? AND ss.shift_date >= ?
          ORDER BY ss.shift_date ASC"
     )
-    .bind(&user_id)
+    .bind(&user.id)
     .bind(&today)
     .fetch_all(&state.db)
     .await
@@ -500,43 +461,17 @@ pub async fn get_my_shifts(
         })
         .collect();
 
-    info!("✅ Found {} shifts for user {}", user_shifts.len(), user_id);
+    info!("✅ Found {} shifts for user {}", user_shifts.len(), user.id);
     Ok(Json(user_shifts))
 }
 
-// Admin: Remove user from shift (committee only)
+// Committee: Remove user from shift (committee only)
 pub async fn admin_remove_from_shift(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    CommitteeUser(committee_user): CommitteeUser,
     Path((date, target_user_id)): Path<(String, String)>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    let admin_user_id = get_user_id_from_headers(&headers)?;
-
-    info!("🗑️ Admin {} removing user {} from shift on {}", admin_user_id, target_user_id, date);
-
-    // Check if requesting user is committee
-    let admin_user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
-        .bind(&admin_user_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| {
-            error!("❌ Failed to fetch admin user: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: "Failed to verify permissions".to_string(),
-                }),
-            )
-        })?;
-
-    if !admin_user.is_committee {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(ErrorResponse {
-                error: "Only committee members can remove users from shifts".to_string(),
-            }),
-        ));
-    }
+    info!("🗑️ Committee member {} removing user {} from shift on {}", committee_user.id, target_user_id, date);
 
     let result = sqlx::query("DELETE FROM shift_signups WHERE shift_date = ? AND user_id = ?")
         .bind(&date)
@@ -562,6 +497,6 @@ pub async fn admin_remove_from_shift(
         ));
     }
 
-    info!("✅ Admin {} removed user {} from shift on {}", admin_user_id, target_user_id, date);
+    info!("✅ Committee member {} removed user {} from shift on {}", committee_user.id, target_user_id, date);
     Ok(StatusCode::OK)
 }

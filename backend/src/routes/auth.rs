@@ -132,9 +132,11 @@ pub async fn register_finish(
             )
         })?;
 
-    let is_committee = user_count.0 == 0;
-    if is_committee {
-        info!("👑 First user - granting committee permissions");
+    let is_first_user = user_count.0 == 0;
+    let is_committee = is_first_user;
+    let is_admin = is_first_user;
+    if is_first_user {
+        info!("👑 First user - granting admin and committee permissions");
     }
 
     // Store user with passkey
@@ -142,16 +144,18 @@ pub async fn register_finish(
         display_name,
         serde_json::to_string(&passkey).unwrap(),
         is_committee,
+        is_admin,
     );
 
     info!("💾 Storing user with ID: {}", user.id);
     debug!("🔑 Passkey credential: {}", user.passkey_credential);
 
-    sqlx::query("INSERT INTO users (id, display_name, passkey_credential, is_committee, code_of_conduct_signed, food_safety_completed, food_safety_certificate, induction_completed, has_contract, contract_expiry_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    sqlx::query("INSERT INTO users (id, display_name, passkey_credential, is_committee, is_admin, code_of_conduct_signed, food_safety_completed, food_safety_certificate, induction_completed, has_contract, contract_expiry_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(&user.id)
         .bind(&user.display_name)
         .bind(&user.passkey_credential)
         .bind(is_committee)
+        .bind(is_admin)
         .bind(&user.code_of_conduct_signed)
         .bind(&user.food_safety_completed)
         .bind(&user.food_safety_certificate)
@@ -194,6 +198,7 @@ pub async fn register_finish(
         token,
         user_id: user.id,
         is_committee: user.is_committee,
+        is_admin: user.is_admin,
     }))
 }
 
@@ -390,5 +395,6 @@ pub async fn login_finish(
         token,
         user_id: user.id.clone(),
         is_committee: user.is_committee,
+        is_admin: user.is_admin,
     }))
 }

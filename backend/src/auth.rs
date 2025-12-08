@@ -1,7 +1,16 @@
+use axum::{
+    async_trait,
+    extract::FromRequestParts,
+    http::{request::Parts, StatusCode},
+    Json,
+};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 use std::time::{SystemTime, UNIX_EPOCH};
-use uuid::Uuid;
+
+use crate::models::{ErrorResponse, User};
+use crate::routes::auth::AppState;
 
 const JWT_SECRET: &[u8] = b"your-secret-key-change-this-in-production";
 
@@ -46,4 +55,113 @@ pub fn extract_user_id_from_header(auth_header: Option<&str>) -> Option<String> 
     let token = auth_header?.strip_prefix("Bearer ")?;
     let claims = verify_jwt_token(token).ok()?;
     Some(claims.sub)
+}
+
+// ===== Auth Extractors =====
+// These extractors automatically authenticate and authorize requests
+
+/// Extractor for any authenticated user
+pub struct AuthenticatedUser(pub User);
+
+#[async_trait]
+impl FromRequestParts<AppState> for AuthenticatedUser {
+    type Rejection = (StatusCode, Json<ErrorResponse>);
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let user = extract_user_from_request(parts, &state.db).await?;
+        Ok(AuthenticatedUser(user))
+    }
+}
+
+/// Extractor for committee members (is_committee = true)
+pub struct CommitteeUser(pub User);
+
+#[async_trait]
+impl FromRequestParts<AppState> for CommitteeUser {
+    type Rejection = (StatusCode, Json<ErrorResponse>);
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let user = extract_user_from_request(parts, &state.db).await?;
+
+        if !user.is_committee {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(ErrorResponse {
+                    error: "Committee access required".to_string(),
+                }),
+            ));
+        }
+
+        Ok(CommitteeUser(user))
+    }
+}
+
+/// Extractor for admins (is_admin = true)
+pub struct AdminUser(pub User);
+
+#[async_trait]
+impl FromRequestParts<AppState> for AdminUser {
+    type Rejection = (StatusCode, Json<ErrorResponse>);
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let user = extract_user_from_request(parts, &state.db).await?;
+
+        if !user.is_admin {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(ErrorResponse {
+                    error: "Admin access required".to_string(),
+                }),
+            ));
+        }
+
+        Ok(AdminUser(user))
+    }
+}
+
+/// Helper function to extract and fetch user from request
+async fn extract_user_from_request(
+    parts: &Parts,
+    db: &SqlitePool,
+) -> Result<User, (StatusCode, Json<ErrorResponse>)> {
+    // Get auth header
+    let auth_header = parts
+        .headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok());
+
+    // Extract user_id from JWT
+    let user_id = extract_user_id_from_header(auth_header).ok_or_else(|| {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: "Not authenticated".to_string(),
+            }),
+        )
+    })?;
+
+    // Fetch user from database
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+        .bind(&user_id)
+        .fetch_one(db)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: "User not found".to_string(),
+                }),
+            )
+        })?;
+
+    Ok(user)
 }

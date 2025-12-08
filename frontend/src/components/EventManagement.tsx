@@ -10,7 +10,7 @@ interface EventManagementProps {
 }
 
 export default function EventManagement({ onEventsChange }: EventManagementProps) {
-  const [events, setEvents] = useState<Event[]>([])
+  const [allEvents, setAllEvents] = useState<Event[]>([])
   const [loading, setLoading] = useState(true)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -18,6 +18,18 @@ export default function EventManagement({ onEventsChange }: EventManagementProps
   const [maxVolunteers, setMaxVolunteers] = useState<number | ''>('')
   const [requiresContract, setRequiresContract] = useState(false)
   const [editingEvent, setEditingEvent] = useState<Event | null>(null)
+  const [showPastEvents, setShowPastEvents] = useState(false)
+
+  // Get start of current month as default filter
+  const getMonthStart = () => {
+    const now = new Date()
+    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
+  }
+
+  // Filter events based on toggle
+  const events = showPastEvents
+    ? allEvents
+    : allEvents.filter(e => e.event_date >= getMonthStart())
 
   useEffect(() => {
     loadEvents()
@@ -26,9 +38,9 @@ export default function EventManagement({ onEventsChange }: EventManagementProps
   const loadEvents = async () => {
     setLoading(true)
     try {
-      // Load all future events for management
+      // Load all events for management
       const fetchedEvents = await getEvents()
-      setEvents(fetchedEvents)
+      setAllEvents(fetchedEvents)
     } catch (err) {
       console.error('Failed to load events:', err)
     } finally {
@@ -386,6 +398,22 @@ export default function EventManagement({ onEventsChange }: EventManagementProps
       </div>
 
       {/* Calendar */}
+      <div style={{ marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={showPastEvents}
+            onChange={(e) => setShowPastEvents(e.target.checked)}
+            style={{ marginRight: '8px', width: '16px', height: '16px', cursor: 'pointer' }}
+          />
+          <span>Show past events</span>
+        </label>
+        {!showPastEvents && (
+          <span style={{ color: '#666', fontSize: '14px' }}>
+            (showing from {new Date().toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })} onwards)
+          </span>
+        )}
+      </div>
       {loading ? (
         <div style={{ padding: '40px', textAlign: 'center' }}>Loading calendar...</div>
       ) : (
@@ -393,7 +421,7 @@ export default function EventManagement({ onEventsChange }: EventManagementProps
           events={previewEvents}
           selectable={true}
           onSelectSlot={handleSelectSlot}
-          defaultDate={new Date('2025-10-06')}
+          defaultDate={new Date()}
         />
       )}
 
