@@ -58,6 +58,9 @@ export async function registerWithPasskey(displayName: string): Promise<AuthResp
     localStorage.setItem('user_id', authResponse.user_id)
     localStorage.setItem('is_committee', authResponse.is_committee.toString())
 
+    // Reload to reflect new auth state
+    window.location.reload()
+
     return authResponse
   } catch (error) {
     if (error instanceof AuthError) {
@@ -109,6 +112,9 @@ export async function loginWithPasskey(): Promise<AuthResponse> {
     localStorage.setItem('user_id', authResponse.user_id)
     localStorage.setItem('is_committee', authResponse.is_committee.toString())
 
+    // Reload to reflect new auth state
+    window.location.reload()
+
     return authResponse
   } catch (error) {
     if (error instanceof AuthError) {
@@ -125,6 +131,9 @@ export function logout(): void {
   localStorage.removeItem('auth_token')
   localStorage.removeItem('user_id')
   localStorage.removeItem('is_committee')
+
+  // Reload to reflect logged out state
+  window.location.reload()
 }
 
 /**
@@ -267,18 +276,27 @@ export async function getPendingCertificates(): Promise<PendingCertificate[]> {
   return response.json()
 }
 
+export interface CertificateData {
+  url: string
+  contentType: string
+}
+
 /**
- * Get certificate image URL for viewing (with auth header)
+ * Get certificate URL and content type for viewing (with auth header)
  */
-export async function getCertificateImageUrl(userId: string): Promise<string> {
+export async function getCertificateData(userId: string): Promise<CertificateData> {
   const response = await authenticatedFetch(`${API_BASE}/api/admin/certificate/${userId}`)
 
   if (!response.ok) {
     throw new AuthError('Failed to fetch certificate')
   }
 
+  const contentType = response.headers.get('content-type') || 'image/jpeg'
   const blob = await response.blob()
-  return URL.createObjectURL(blob)
+  return {
+    url: URL.createObjectURL(blob),
+    contentType,
+  }
 }
 
 /**

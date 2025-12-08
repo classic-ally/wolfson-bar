@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { verifyInduction } from '../../lib/auth'
+import { usePageTitle } from '../../hooks/usePageTitle'
 import QRScanner from '../QRScanner'
 
 export default function CommitteeInduction() {
   const [showScanner, setShowScanner] = useState(false)
+  usePageTitle('Verify Induction')
 
   const handleQRScan = async (token: string) => {
     try {

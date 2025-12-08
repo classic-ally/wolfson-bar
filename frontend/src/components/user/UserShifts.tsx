@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { getMyShifts, UserShift, cancelShiftSignup } from '../../lib/auth'
+import { usePageTitle } from '../../hooks/usePageTitle'
 
 export default function UserShifts() {
   const [shifts, setShifts] = useState<UserShift[]>([])
   const [loading, setLoading] = useState(true)
   const [cancelling, setCancelling] = useState<string | null>(null)
+  usePageTitle('My Shifts')
 
   useEffect(() => {
     loadShifts()

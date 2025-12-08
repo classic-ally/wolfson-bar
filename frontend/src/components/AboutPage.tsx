@@ -1,9 +1,11 @@
 import { useState } from 'react'
+import { usePageTitle } from '../hooks/usePageTitle'
 
 type TabType = 'about' | 'rota' | 'barco'
 
 export default function AboutPage() {
   const [activeTab, setActiveTab] = useState<TabType>('about')
+  usePageTitle('About')
 
   return (
     <main className="content" style={{ maxWidth: '1200px', margin: '0 auto', padding: '40px 20px' }}>

@@ -4,6 +4,7 @@ mod models;
 mod routes;
 
 use axum::{
+    extract::DefaultBodyLimit,
     routing::{get, post},
     Router,
 };
@@ -80,6 +81,18 @@ async fn main() {
         tracing::info!("Stock migration already applied (ignoring duplicate errors)");
     }
 
+    // Run certificate type migration (ignore duplicate errors for idempotency)
+    if let Err(e) = sqlx::query(&std::fs::read_to_string("migrations/006_certificate_type.sql").expect("Failed to read migration"))
+        .execute(&db)
+        .await
+    {
+        // Ignore errors if already applied
+        if !e.to_string().contains("duplicate column") {
+            panic!("Failed to run certificate type migration: {}", e);
+        }
+        tracing::info!("Certificate type migration already applied (ignoring duplicate errors)");
+    }
+
     // Get public URL from environment (required)
     let public_url = std::env::var("PUBLIC_URL")
         .expect("PUBLIC_URL environment variable must be set");
@@ -116,6 +129,7 @@ async fn main() {
         .route("/api/users/me/display-name", axum::routing::put(update_display_name))
         .route("/api/users/me/accept-coc", post(accept_coc))
         .route("/api/users/me/food-safety-certificate", post(upload_certificate))
+        .layer(DefaultBodyLimit::max(10 * 1024 * 1024)) // 10MB limit for certificate uploads
         .route("/api/users/me/verification-token", get(get_verification_token))
         .route("/api/users/me/contract-request", post(submit_contract_request))
         .route("/api/admin/pending-certificates", get(get_pending_certificates))

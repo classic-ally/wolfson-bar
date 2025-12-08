@@ -187,10 +187,14 @@ pub async fn get_certificate(
         )
     })?;
 
-    // Return image as response
+    // Use stored content type, or default to image/jpeg for legacy data
+    let content_type = target_user.food_safety_certificate_type
+        .unwrap_or_else(|| "image/jpeg".to_string());
+
+    // Return file as response with correct content type
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "image/jpeg")
+        .header(header::CONTENT_TYPE, content_type)
         .body(Body::from(certificate_bytes))
         .unwrap())
 }

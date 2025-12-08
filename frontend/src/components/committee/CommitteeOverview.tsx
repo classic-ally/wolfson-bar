@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getOverviewStats, OverviewStats } from '../../lib/auth'
+import { usePageTitle } from '../../hooks/usePageTitle'
 
 export default function CommitteeOverview() {
   const navigate = useNavigate()
   const [stats, setStats] = useState<OverviewStats | null>(null)
   const [loading, setLoading] = useState(true)
+  usePageTitle('Committee')
 
   useEffect(() => {
     loadStats()

@@ -54,8 +54,8 @@ export default function OnboardingPage() {
       return
     }
 
-    if (!file.type.startsWith('image/')) {
-      alert('Only image files are allowed')
+    if (!file.type.startsWith('image/') && file.type !== 'application/pdf') {
+      alert('Only image files and PDFs are allowed')
       return
     }
 
@@ -378,11 +378,12 @@ export default function OnboardingPage() {
               <input
                 id="certificate-upload"
                 type="file"
-                accept="image/*"
+                accept="image/*,application/pdf"
                 onChange={handleCertificateUpload}
                 disabled={uploading}
                 style={{ display: 'none' }}
               />
+              <span style={{ color: '#888', fontSize: '12px' }}>Accepts images or PDF (max 5 MB)</span>
               {status.has_food_safety_certificate && (
                 <span style={{ color: '#856404', fontSize: '14px' }}>⏳ Pending committee review</span>
               )}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getUserStatus, UserStatus, acceptCodeOfConduct, uploadCertificate, getVerificationToken } from '../../lib/auth'
+import { usePageTitle } from '../../hooks/usePageTitle'
 import CodeOfConduct from '../CodeOfConduct'
 import QRCode from 'qrcode'
 
@@ -10,6 +11,7 @@ export default function UserInduction() {
   const [uploading, setUploading] = useState(false)
   const [showQR, setShowQR] = useState(false)
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
+  usePageTitle('Induction')
 
   useEffect(() => {
     loadStatus()
@@ -50,8 +52,8 @@ export default function UserInduction() {
       return
     }
 
-    if (!file.type.startsWith('image/')) {
-      alert('Only image files are allowed')
+    if (!file.type.startsWith('image/') && file.type !== 'application/pdf') {
+      alert('Only image files and PDFs are allowed')
       return
     }
 
@@ -220,11 +222,12 @@ export default function UserInduction() {
               <input
                 id="certificate-upload"
                 type="file"
-                accept="image/*"
+                accept="image/*,application/pdf"
                 onChange={handleCertificateUpload}
                 disabled={uploading}
                 style={{ display: 'none' }}
               />
+              <span style={{ color: '#888', fontSize: '12px' }}>Accepts images or PDF (max 5 MB)</span>
               {status.has_food_safety_certificate && (
                 <span style={{ color: '#856404', fontSize: '14px' }}>⏳ Pending committee review</span>
               )}

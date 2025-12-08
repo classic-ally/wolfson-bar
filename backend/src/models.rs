@@ -35,6 +35,8 @@ pub struct User {
     pub food_safety_completed: bool,
     #[sqlx(default)]
     pub food_safety_certificate: Option<Vec<u8>>,
+    #[sqlx(default)]
+    pub food_safety_certificate_type: Option<String>,
     pub induction_completed: bool,
     pub has_contract: bool,
     pub contract_expiry_date: Option<String>,
@@ -70,6 +72,7 @@ impl User {
             code_of_conduct_signed: false,
             food_safety_completed: false,
             food_safety_certificate: None,
+            food_safety_certificate_type: None,
             induction_completed: false,
             has_contract: false,
             contract_expiry_date: None,

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getUserStatus, UserStatus, updateDisplayName, submitContractRequest } from '../../lib/auth'
+import { usePageTitle } from '../../hooks/usePageTitle'
 
 export default function UserProfile() {
   const [status, setStatus] = useState<UserStatus | null>(null)
@@ -8,6 +9,7 @@ export default function UserProfile() {
   const [newDisplayName, setNewDisplayName] = useState('')
   const [contractExpiryDate, setContractExpiryDate] = useState('')
   const [submittingContract, setSubmittingContract] = useState(false)
+  usePageTitle('Account')
 
   useEffect(() => {
     loadStatus()

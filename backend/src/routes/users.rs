@@ -228,23 +228,27 @@ pub async fn upload_certificate(
         ));
     }
 
-    // Validate content type (image only)
-    if let Some(ct) = content_type {
-        if !ct.starts_with("image/") {
+    // Validate content type (images and PDFs only)
+    let stored_type = if let Some(ref ct) = content_type {
+        if !ct.starts_with("image/") && ct != "application/pdf" {
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(ErrorResponse {
-                    error: "Only image files are allowed".to_string(),
+                    error: "Only image files and PDFs are allowed".to_string(),
                 }),
             ));
         }
-    }
+        ct.clone()
+    } else {
+        "application/octet-stream".to_string()
+    };
 
-    info!("📸 Storing certificate ({} bytes) for user: {}", file_bytes.len(), user_id);
+    info!("📸 Storing certificate ({} bytes, type: {}) for user: {}", file_bytes.len(), stored_type, user_id);
 
-    // Store BLOB in database
-    sqlx::query("UPDATE users SET food_safety_certificate = ? WHERE id = ?")
+    // Store BLOB and content type in database
+    sqlx::query("UPDATE users SET food_safety_certificate = ?, food_safety_certificate_type = ? WHERE id = ?")
         .bind(&file_bytes)
+        .bind(&stored_type)
         .bind(&user_id)
         .execute(&state.db)
         .await

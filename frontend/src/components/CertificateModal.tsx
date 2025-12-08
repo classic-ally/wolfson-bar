@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getCertificateImageUrl } from '../lib/auth'
+import { getCertificateData, CertificateData } from '../lib/auth'
 
 interface CertificateModalProps {
   userId: string
@@ -9,20 +9,22 @@ interface CertificateModalProps {
 }
 
 export default function CertificateModal({ userId, displayName, onApprove, onClose }: CertificateModalProps) {
-  const [imageUrl, setImageUrl] = useState<string | null>(null)
+  const [certificate, setCertificate] = useState<CertificateData | null>(null)
 
   useEffect(() => {
-    getCertificateImageUrl(userId)
-      .then(setImageUrl)
+    getCertificateData(userId)
+      .then(setCertificate)
       .catch(err => console.error('Failed to load certificate:', err))
 
     // Cleanup blob URL when component unmounts
     return () => {
-      if (imageUrl) {
-        URL.revokeObjectURL(imageUrl)
+      if (certificate?.url) {
+        URL.revokeObjectURL(certificate.url)
       }
     }
   }, [userId])
+
+  const isPdf = certificate?.contentType === 'application/pdf'
 
   return (
     <div
@@ -45,10 +47,14 @@ export default function CertificateModal({ userId, displayName, onApprove, onClo
           backgroundColor: 'white',
           borderRadius: '8px',
           padding: '30px',
-          maxWidth: '800px',
+          width: isPdf ? '90vw' : 'auto',
+          maxWidth: isPdf ? '1200px' : '800px',
+          height: isPdf ? '90vh' : 'auto',
           maxHeight: '90vh',
           overflow: 'auto',
           position: 'relative',
+          display: isPdf ? 'flex' : 'block',
+          flexDirection: 'column',
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -77,13 +83,26 @@ export default function CertificateModal({ userId, displayName, onApprove, onClo
           style={{
             marginBottom: '20px',
             textAlign: 'center',
+            flex: isPdf ? 1 : undefined,
+            minHeight: 0,
           }}
         >
-          {!imageUrl ? (
-            <div style={{ padding: '40px', color: '#666' }}>Loading image...</div>
+          {!certificate ? (
+            <div style={{ padding: '40px', color: '#666' }}>Loading...</div>
+          ) : isPdf ? (
+            <iframe
+              src={certificate.url}
+              title="Food Safety Certificate"
+              style={{
+                width: '100%',
+                height: '100%',
+                borderRadius: '4px',
+                border: '1px solid #ddd',
+              }}
+            />
           ) : (
             <img
-              src={imageUrl}
+              src={certificate.url}
               alt="Food Safety Certificate"
               style={{
                 maxWidth: '100%',

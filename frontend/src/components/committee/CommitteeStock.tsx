@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getProducts, Product } from '../../lib/auth'
+import { usePageTitle } from '../../hooks/usePageTitle'
 
 export default function CommitteeStock() {
   const navigate = useNavigate()
@@ -8,6 +9,7 @@ export default function CommitteeStock() {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('')
   const [categoryFilter, setCategoryFilter] = useState<string>('all')
+  usePageTitle('Stock')
 
   useEffect(() => {
     loadProducts()

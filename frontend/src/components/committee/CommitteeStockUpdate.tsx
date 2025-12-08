@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getProducts, Product, createStockTransactions, StockTransaction, lookupBarcode, addBarcode, createProduct } from '../../lib/auth'
+import { usePageTitle } from '../../hooks/usePageTitle'
 import QRScanner from '../QRScanner'
 
 interface TransactionRow {
@@ -19,6 +20,7 @@ export default function CommitteeStockUpdate() {
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [notes, setNotes] = useState('')
+  usePageTitle('Update Stock')
 
   // Global options
   const [useTargetMode, setUseTargetMode] = useState(false)

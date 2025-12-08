@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getPendingCertificates, getPendingContracts, getActiveMembers, approveCertificate, approveContract, PendingCertificate, PendingContract, ActiveMember } from '../../lib/auth'
+import { usePageTitle } from '../../hooks/usePageTitle'
 import CertificateModal from '../CertificateModal'
 
 export default function CommitteeMembers() {
@@ -8,6 +9,7 @@ export default function CommitteeMembers() {
   const [activeMembers, setActiveMembers] = useState<ActiveMember[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedCert, setSelectedCert] = useState<PendingCertificate | null>(null)
+  usePageTitle('Members')
 
   useEffect(() => {
     loadAll()

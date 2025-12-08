@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom'
 import './App.css'
+import { usePageTitle } from './hooks/usePageTitle'
 import { LoginButton } from './components/LoginButton'
 import CommitteeLayout from './components/CommitteeLayout'
 import CommitteeOverview from './components/committee/CommitteeOverview'
@@ -83,6 +84,7 @@ function Header() {
 
 function HomePage() {
   const navigate = useNavigate()
+  usePageTitle()
 
   return (
     <main className="content">
@@ -121,6 +123,7 @@ function EventsPage() {
   const [eventsLoading, setEventsLoading] = useState(false)
   const [selectedShift, setSelectedShift] = useState<ShiftInfo | null>(null)
   const [userStatus, setUserStatus] = useState<UserStatus | null>(null)
+  usePageTitle('Events')
 
   useEffect(() => {
     loadEvents()

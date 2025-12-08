@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getBarHours, updateBarHours, BarHours } from '../../lib/auth'
+import { usePageTitle } from '../../hooks/usePageTitle'
 
 export default function CommitteeHours() {
   const [barHours, setBarHours] = useState<BarHours[]>([])
@@ -7,6 +8,7 @@ export default function CommitteeHours() {
   const [editOpenTime, setEditOpenTime] = useState('')
   const [editCloseTime, setEditCloseTime] = useState('')
   const [loading, setLoading] = useState(true)
+  usePageTitle('Bar Hours')
 
   useEffect(() => {
     loadBarHours()

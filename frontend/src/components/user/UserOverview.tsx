@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getMyOverview, UserOverview as UserOverviewType } from '../../lib/auth'
+import { usePageTitle } from '../../hooks/usePageTitle'
 
 export default function UserOverview() {
   const navigate = useNavigate()
   const [overview, setOverview] = useState<UserOverviewType | null>(null)
   const [loading, setLoading] = useState(true)
+  usePageTitle('Dashboard')
 
   useEffect(() => {
     loadOverview()
