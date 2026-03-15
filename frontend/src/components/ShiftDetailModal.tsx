@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react'
-import { ShiftInfo, signupForShift, cancelShiftSignup, removeUserFromShift, getUserId, UserStatus, ActiveMember, getActiveMembers, assignUserToShift } from '../lib/auth'
+import { ShiftInfo, signupForShift, cancelShiftSignup, removeUserFromShift, getUserId, UserStatus, ActiveMember, getActiveMembers, assignUserToShift, Event } from '../lib/auth'
 
 interface ShiftDetailModalProps {
   shift: ShiftInfo | null
+  event?: Event | null
   userStatus: UserStatus | null
   isCommittee?: boolean
   onClose: () => void
   onUpdate: () => void
 }
 
-export default function ShiftDetailModal({ shift, userStatus, isCommittee, onClose, onUpdate }: ShiftDetailModalProps) {
+export default function ShiftDetailModal({ shift, event, userStatus, isCommittee, onClose, onUpdate }: ShiftDetailModalProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [activeMembers, setActiveMembers] = useState<ActiveMember[]>([])
@@ -136,6 +137,21 @@ export default function ShiftDetailModal({ shift, userStatus, isCommittee, onClo
           <p style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '5px' }}>
             {formatDate(shift.date)}
           </p>
+          {(() => {
+            // Compute effective shift time: broader of bar hours and event times
+            const barOpen = shift.open_time
+            const barClose = shift.close_time
+            const eventStart = event?.start_time
+            const eventEnd = event?.end_time
+            const shiftStart = barOpen && eventStart ? (barOpen < eventStart ? barOpen : eventStart) : barOpen || eventStart
+            const shiftEnd = barClose && eventEnd ? (barClose > eventEnd ? barClose : eventEnd) : barClose || eventEnd
+            if (!shiftStart && !shiftEnd) return null
+            return (
+              <p style={{ color: '#555', fontSize: '15px', marginBottom: '5px' }}>
+                {shiftStart && shiftEnd ? `${shiftStart} – ${shiftEnd}` : shiftStart || shiftEnd}
+              </p>
+            )
+          })()}
           {shift.event_title && (
             <p style={{ color: '#8B0000', fontWeight: 'bold', marginBottom: '5px' }}>
               Event: {shift.event_title}

@@ -461,6 +461,8 @@ export interface Event {
   title: string
   description: string | null
   event_date: string
+  start_time: string | null
+  end_time: string | null
   shift_max_volunteers: number | null
   shift_requires_contract: boolean | null
 }
@@ -516,6 +518,8 @@ export interface ShiftInfo {
   requires_contract: boolean
   signups_count: number
   signups: ShiftSignupUser[]
+  open_time: string | null
+  close_time: string | null
 }
 
 export interface UserShift {

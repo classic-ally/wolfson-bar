@@ -233,13 +233,38 @@ export default function EventsCalendar({
 
   // Convert our Event[] to react-big-calendar format
   const calendarEvents: CalendarEvent[] = events.map(event => {
-    const date = new Date(event.event_date + 'T00:00:00') // Force local midnight
+    const hasTime = !!event.start_time
+    const displayTitle = hasTime ? `${event.start_time} ${event.title}` : event.title
+
+    if (hasTime) {
+      const [sh, sm] = event.start_time!.split(':').map(Number)
+      const start = new Date(event.event_date + 'T00:00:00')
+      start.setHours(sh, sm, 0, 0)
+      let end: Date
+      if (event.end_time) {
+        const [eh, em] = event.end_time.split(':').map(Number)
+        end = new Date(event.event_date + 'T00:00:00')
+        end.setHours(eh, em, 0, 0)
+      } else {
+        end = new Date(start.getTime() + 60 * 60 * 1000) // default 1hr
+      }
+      return {
+        id: event.id,
+        title: displayTitle,
+        start,
+        end,
+        allDay: false,
+        resource: event,
+      }
+    }
+
+    const date = new Date(event.event_date + 'T00:00:00')
     return {
       id: event.id,
-      title: event.title,
+      title: displayTitle,
       start: date,
       end: date,
-      allDay: true, // Mark as all-day event
+      allDay: true,
       resource: event,
     }
   })
@@ -294,10 +319,16 @@ export default function EventsCalendar({
           style={{ height: '100%' }}
           formats={{
             agendaDateFormat: 'dd MMM yyyy',
-            agendaTimeFormat: () => '', // Hide time column
-            agendaTimeRangeFormat: () => '', // Hide time range
+            agendaTimeFormat: (date: Date, _culture: string | undefined, localizer: { format: (d: Date, f: string, c?: string) => string } | undefined) =>
+              localizer ? localizer.format(date, 'HH:mm') : '',
+            agendaTimeRangeFormat: ({ start, end }: { start: Date; end: Date }, _culture: string | undefined, localizer: { format: (d: Date, f: string, c?: string) => string } | undefined) => {
+              if (!localizer) return ''
+              // All-day events: both start and end at midnight
+              if (start.getHours() === 0 && start.getMinutes() === 0 && end.getHours() === 0 && end.getMinutes() === 0) return ''
+              return `${localizer.format(start, 'HH:mm')} – ${localizer.format(end, 'HH:mm')}`
+            },
           }}
-          eventPropGetter={(event) => {
+          eventPropGetter={(_event) => {
             if (view === 'agenda') {
               return {
                 style: {

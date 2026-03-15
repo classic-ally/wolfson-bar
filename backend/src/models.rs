@@ -61,6 +61,8 @@ pub struct Event {
     pub title: String,
     pub description: Option<String>,
     pub event_date: String,
+    pub start_time: Option<String>,
+    pub end_time: Option<String>,
     pub shift_max_volunteers: Option<i32>,
     pub shift_requires_contract: Option<bool>,
 }

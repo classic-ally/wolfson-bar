@@ -256,6 +256,7 @@ function EventsPage() {
 
       <ShiftDetailModal
         shift={selectedShift}
+        event={selectedShift ? events.find(e => e.event_date === selectedShift.date) : null}
         userStatus={userStatus}
         isCommittee={isCommittee()}
         onClose={handleCloseModal}

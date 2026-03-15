@@ -21,6 +21,8 @@ pub struct CreateEventRequest {
     pub title: String,
     pub description: Option<String>,
     pub event_date: String,
+    pub start_time: Option<String>,
+    pub end_time: Option<String>,
     pub shift_max_volunteers: Option<i32>,
     pub shift_requires_contract: Option<bool>,
 }
@@ -30,6 +32,8 @@ pub struct UpdateEventRequest {
     pub title: Option<String>,
     pub description: Option<String>,
     pub event_date: Option<String>,
+    pub start_time: Option<String>,
+    pub end_time: Option<String>,
     pub shift_max_volunteers: Option<i32>,
     pub shift_requires_contract: Option<bool>,
 }
@@ -139,15 +143,34 @@ pub async fn create_event(
         ));
     }
 
+    // Validate time format if provided (HH:MM)
+    fn valid_time(t: &str) -> bool {
+        t.len() == 5 && t.as_bytes()[2] == b':' &&
+        t[..2].parse::<u8>().map_or(false, |h| h < 24) &&
+        t[3..].parse::<u8>().map_or(false, |m| m < 60)
+    }
+    if let Some(ref t) = req.start_time {
+        if !valid_time(t) {
+            return Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Invalid start_time format. Use HH:MM".to_string() })));
+        }
+    }
+    if let Some(ref t) = req.end_time {
+        if !valid_time(t) {
+            return Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Invalid end_time format. Use HH:MM".to_string() })));
+        }
+    }
+
     let event_id = Uuid::new_v4().to_string();
 
     sqlx::query(
-        "INSERT INTO events (id, title, description, event_date, shift_max_volunteers, shift_requires_contract) VALUES (?, ?, ?, ?, ?, ?)"
+        "INSERT INTO events (id, title, description, event_date, start_time, end_time, shift_max_volunteers, shift_requires_contract) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     )
     .bind(&event_id)
     .bind(&req.title)
     .bind(&req.description)
     .bind(&req.event_date)
+    .bind(&req.start_time)
+    .bind(&req.end_time)
     .bind(&req.shift_max_volunteers)
     .bind(&req.shift_requires_contract)
     .execute(&state.db)
@@ -167,6 +190,8 @@ pub async fn create_event(
         title: req.title,
         description: req.description,
         event_date: req.event_date,
+        start_time: req.start_time,
+        end_time: req.end_time,
         shift_max_volunteers: req.shift_max_volunteers,
         shift_requires_contract: req.shift_requires_contract,
     };
@@ -209,6 +234,9 @@ pub async fn update_event(
     if let Some(event_date) = req.event_date {
         event.event_date = event_date;
     }
+    // start_time and end_time: always update (allows clearing by sending null)
+    event.start_time = req.start_time;
+    event.end_time = req.end_time;
     if req.shift_max_volunteers.is_some() {
         event.shift_max_volunteers = req.shift_max_volunteers;
     }
@@ -217,11 +245,13 @@ pub async fn update_event(
     }
 
     sqlx::query(
-        "UPDATE events SET title = ?, description = ?, event_date = ?, shift_max_volunteers = ?, shift_requires_contract = ? WHERE id = ?"
+        "UPDATE events SET title = ?, description = ?, event_date = ?, start_time = ?, end_time = ?, shift_max_volunteers = ?, shift_requires_contract = ? WHERE id = ?"
     )
     .bind(&event.title)
     .bind(&event.description)
     .bind(&event.event_date)
+    .bind(&event.start_time)
+    .bind(&event.end_time)
     .bind(&event.shift_max_volunteers)
     .bind(&event.shift_requires_contract)
     .bind(&event_id)

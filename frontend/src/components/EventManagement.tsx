@@ -16,6 +16,8 @@ export default function EventManagement({ onEventsChange }: EventManagementProps
   const [selectedDates, setSelectedDates] = useState<Date[]>([])
   const [maxVolunteers, setMaxVolunteers] = useState<number | ''>('')
   const [requiresContract, setRequiresContract] = useState(false)
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
   const [editingEvent, setEditingEvent] = useState<Event | null>(null)
   const [showPastEvents, setShowPastEvents] = useState(false)
 
@@ -103,6 +105,8 @@ export default function EventManagement({ onEventsChange }: EventManagementProps
             title: title.trim(),
             description: description.trim() || null,
             event_date: eventDate,
+            start_time: startTime || null,
+            end_time: endTime || null,
             shift_max_volunteers: maxVolunteers === '' ? null : maxVolunteers,
             shift_requires_contract: requiresContract ? true : null,
           }),
@@ -113,6 +117,8 @@ export default function EventManagement({ onEventsChange }: EventManagementProps
       setTitle('')
       setDescription('')
       setSelectedDates([])
+      setStartTime('')
+      setEndTime('')
       setMaxVolunteers('')
       setRequiresContract(false)
 
@@ -134,6 +140,8 @@ export default function EventManagement({ onEventsChange }: EventManagementProps
     setEditingEvent(event)
     setTitle(event.title)
     setDescription(event.description || '')
+    setStartTime(event.start_time || '')
+    setEndTime(event.end_time || '')
     setMaxVolunteers(event.shift_max_volunteers || '')
     setRequiresContract(event.shift_requires_contract || false)
     // Scroll to top to show the form
@@ -145,6 +153,8 @@ export default function EventManagement({ onEventsChange }: EventManagementProps
     setTitle('')
     setDescription('')
     setSelectedDates([])
+    setStartTime('')
+    setEndTime('')
     setMaxVolunteers('')
     setRequiresContract(false)
   }
@@ -173,6 +183,8 @@ export default function EventManagement({ onEventsChange }: EventManagementProps
         body: JSON.stringify({
           title: title.trim(),
           description: description.trim() || null,
+          start_time: startTime || null,
+          end_time: endTime || null,
           shift_max_volunteers: maxVolunteers === '' ? null : maxVolunteers,
           shift_requires_contract: requiresContract ? true : null,
         }),
@@ -233,6 +245,10 @@ export default function EventManagement({ onEventsChange }: EventManagementProps
       title: title || '(New Event)',
       description: description || null,
       event_date: formatDateToLocal(date),
+      start_time: startTime || null,
+      end_time: endTime || null,
+      shift_max_volunteers: null,
+      shift_requires_contract: null,
     }))
   ]
 
@@ -289,6 +305,41 @@ export default function EventManagement({ onEventsChange }: EventManagementProps
               fontFamily: 'inherit'
             }}
           />
+        </div>
+
+        <div style={{ marginBottom: '15px', display: 'flex', gap: '15px' }}>
+          <div>
+            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 500 }}>
+              Start Time
+            </label>
+            <input
+              type="time"
+              value={startTime}
+              onChange={(e) => setStartTime(e.target.value)}
+              style={{
+                padding: '8px',
+                border: '1px solid #ddd',
+                borderRadius: '4px',
+                fontSize: '14px'
+              }}
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 500 }}>
+              End Time
+            </label>
+            <input
+              type="time"
+              value={endTime}
+              onChange={(e) => setEndTime(e.target.value)}
+              style={{
+                padding: '8px',
+                border: '1px solid #ddd',
+                borderRadius: '4px',
+                fontSize: '14px'
+              }}
+            />
+          </div>
         </div>
 
         <div style={{ marginBottom: '15px' }}>

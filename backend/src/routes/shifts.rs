@@ -4,6 +4,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use chrono::Datelike;
 use tracing::{info, error};
 use ts_rs::TS;
 
@@ -36,6 +37,8 @@ pub struct ShiftInfo {
     pub requires_contract: bool,
     pub signups_count: i32,
     pub signups: Vec<ShiftSignupUser>,
+    pub open_time: Option<String>,
+    pub close_time: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, TS)]
@@ -74,11 +77,42 @@ pub async fn get_shifts(
             )
         })?;
 
+    // Fetch bar hours upfront (indexed by day_of_week: 0=Sunday..6=Saturday)
+    #[derive(sqlx::FromRow)]
+    struct BarHoursRow {
+        day_of_week: i32,
+        open_time: String,
+        close_time: String,
+    }
+    let bar_hours_rows = sqlx::query_as::<_, BarHoursRow>(
+        "SELECT day_of_week, open_time, close_time FROM bar_hours"
+    )
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
+    let mut bar_hours_map: std::collections::HashMap<i32, (String, String)> = std::collections::HashMap::new();
+    for row in bar_hours_rows {
+        bar_hours_map.insert(row.day_of_week, (row.open_time, row.close_time));
+    }
+
     let mut shifts = Vec::new();
     let mut current_date = start;
 
     while current_date <= end {
         let date_str = current_date.format("%Y-%m-%d").to_string();
+
+        // Look up bar hours for this day of week (chrono: Mon=0..Sun=6 -> DB: 0=Sun..6=Sat)
+        let dow_db = match current_date.weekday() {
+            chrono::Weekday::Sun => 0,
+            chrono::Weekday::Mon => 1,
+            chrono::Weekday::Tue => 2,
+            chrono::Weekday::Wed => 3,
+            chrono::Weekday::Thu => 4,
+            chrono::Weekday::Fri => 5,
+            chrono::Weekday::Sat => 6,
+        };
+        let bar_hours = bar_hours_map.get(&dow_db);
 
         // Get all events for this date (may be multiple)
         #[derive(sqlx::FromRow)]
@@ -187,6 +221,8 @@ pub async fn get_shifts(
                     is_committee: s.is_committee,
                 })
                 .collect(),
+            open_time: bar_hours.map(|(o, _)| o.clone()),
+            close_time: bar_hours.map(|(_, c)| c.clone()),
         });
 
         current_date = current_date.succ_opt().ok_or_else(|| {
