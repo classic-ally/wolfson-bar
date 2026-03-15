@@ -118,6 +118,7 @@ function HomePage() {
           <p><em>Oh the Wolfson wolves they howl at night,</em></p>
           <p><em>With tankards full and spirits bright,</em></p>
           <p><em>They prowl the bar by moonlight's gleam,</em></p>
+          <p><em>Where beer flows thick as a scholar's dream</em></p>
         </div>
       </div>
     </main>
@@ -228,10 +229,6 @@ function EventsPage() {
 
       {eventsLoading ? (
         <div style={{ padding: '40px', textAlign: 'center' }}>Loading events...</div>
-      ) : events.length === 0 ? (
-        <div style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
-          No events scheduled yet. Check back soon!
-        </div>
       ) : (
         <EventsCalendar
           events={events}

@@ -3,7 +3,7 @@ import { SlotInfo } from 'react-big-calendar'
 import EventsCalendar from './EventsCalendar'
 import { getEvents, Event } from '../lib/auth'
 
-const API_BASE = 'http://localhost:3000'
+const API_BASE = window.location.origin
 
 interface EventManagementProps {
   onEventsChange?: () => void
