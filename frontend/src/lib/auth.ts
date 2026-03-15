@@ -186,13 +186,23 @@ export async function authenticatedFetch(url: string, options: RequestInit = {})
     throw new AuthError('Not authenticated')
   }
 
-  return fetch(url, {
+  const response = await fetch(url, {
     ...options,
     headers: {
       ...options.headers,
       'Authorization': `Bearer ${token}`,
     },
   })
+
+  if (response.status === 401) {
+    localStorage.removeItem('auth_token')
+    localStorage.removeItem('user_id')
+    localStorage.removeItem('is_committee')
+    localStorage.removeItem('is_admin')
+    window.location.reload()
+  }
+
+  return response
 }
 
 export interface UserStatus {
@@ -468,6 +478,25 @@ export async function getEvents(startDate?: string, endDate?: string): Promise<E
 
   if (!response.ok) {
     throw new Error('Failed to fetch events')
+  }
+
+  return response.json()
+}
+
+export interface TermWeek {
+  summary: string
+  start_date: string
+  end_date: string
+}
+
+/**
+ * Get Oxford term weeks (public endpoint, no auth required)
+ */
+export async function getTermWeeks(): Promise<TermWeek[]> {
+  const response = await fetch(`${API_BASE}/api/term-weeks`)
+
+  if (!response.ok) {
+    return [] // Non-critical, degrade gracefully
   }
 
   return response.json()

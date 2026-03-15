@@ -24,7 +24,7 @@ import MenuPage from './components/MenuPage'
 import EventsCalendar from './components/EventsCalendar'
 import ShiftDetailModal from './components/ShiftDetailModal'
 import ProtectedRoute from './components/ProtectedRoute'
-import { isLoggedIn, getEvents, Event, getShifts, ShiftInfo, getUserStatus, UserStatus } from './lib/auth'
+import { isLoggedIn, getEvents, Event, getShifts, ShiftInfo, getUserStatus, UserStatus, getTermWeeks, TermWeek } from './lib/auth'
 
 // Helper to get date range for events (3 months before to 3 months after current month)
 function getEventsDateRange() {
@@ -128,6 +128,7 @@ function HomePage() {
 function EventsPage() {
   const [events, setEvents] = useState<Event[]>([])
   const [shifts, setShifts] = useState<ShiftInfo[]>([])
+  const [termWeeks, setTermWeeks] = useState<TermWeek[]>([])
   const [eventsLoading, setEventsLoading] = useState(false)
   const [selectedShift, setSelectedShift] = useState<ShiftInfo | null>(null)
   const [userStatus, setUserStatus] = useState<UserStatus | null>(null)
@@ -135,6 +136,7 @@ function EventsPage() {
 
   useEffect(() => {
     loadEvents()
+    getTermWeeks().then(setTermWeeks)
     if (isLoggedIn()) {
       loadShifts()
       loadUserStatus()
@@ -234,8 +236,8 @@ function EventsPage() {
           events={events}
           shifts={isLoggedIn() ? shifts : undefined}
           userStatus={userStatus}
-          selectable={isLoggedIn()}
-          onSelectSlot={(slotInfo) => handleDateClick(slotInfo.start)}
+          termWeeks={termWeeks}
+          onDateClick={isLoggedIn() ? handleDateClick : undefined}
           onSelectEvent={(event) => handleDateClick(event.start)}
           defaultDate={new Date()}
           defaultView="month"

@@ -17,6 +17,7 @@ use routes::calendar::{get_calendar_feed, download_event, get_user_calendar};
 #[cfg(debug_assertions)]
 use routes::local::generate_jwt;
 use routes::stock::{create_product, lookup_barcode, add_barcode, create_transactions, get_products};
+use routes::term_weeks::get_term_weeks;
 use sqlx::sqlite::SqlitePoolOptions;
 use rand::Rng;
 use std::net::SocketAddr;
@@ -110,6 +111,7 @@ async fn main() {
         .route("/api/admin/bar-hours", get(get_bar_hours))
         .route("/api/admin/bar-hours", axum::routing::put(update_bar_hours))
         .route("/api/admin/overview", get(get_overview_stats))
+        .route("/api/term-weeks", get(get_term_weeks))
         .route("/api/events", get(get_events))
         .route("/api/events/:id", get(get_event))
         .route("/api/events/calendar.ics", get(get_calendar_feed))

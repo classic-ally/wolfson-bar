@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react'
-import { SlotInfo } from 'react-big-calendar'
 import EventsCalendar from './EventsCalendar'
 import { getEvents, Event } from '../lib/auth'
 
@@ -55,8 +54,7 @@ export default function EventManagement({ onEventsChange }: EventManagementProps
     return `${year}-${month}-${day}`
   }
 
-  const handleSelectSlot = (slotInfo: SlotInfo) => {
-    const date = slotInfo.start
+  const handleSelectSlot = (date: Date) => {
 
     // Toggle date selection
     const dateString = formatDateToLocal(date)
@@ -419,8 +417,7 @@ export default function EventManagement({ onEventsChange }: EventManagementProps
       ) : (
         <EventsCalendar
           events={previewEvents}
-          selectable={true}
-          onSelectSlot={handleSelectSlot}
+          onDateClick={handleSelectSlot}
           defaultDate={new Date()}
         />
       )}

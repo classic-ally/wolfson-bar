@@ -1,9 +1,9 @@
-import { useState } from 'react'
-import { Calendar, dateFnsLocalizer, SlotInfo, ToolbarProps } from 'react-big-calendar'
+import React, { useState } from 'react'
+import { Calendar, dateFnsLocalizer, ToolbarProps } from 'react-big-calendar'
 import { format, parse, startOfWeek, getDay } from 'date-fns'
 import { enGB } from 'date-fns/locale'
 import 'react-big-calendar/lib/css/react-big-calendar.css'
-import { Event, ShiftInfo, UserStatus } from '../lib/auth'
+import { Event, ShiftInfo, UserStatus, TermWeek } from '../lib/auth'
 
 interface CalendarEvent {
   id: string
@@ -90,9 +90,9 @@ interface EventsCalendarProps {
   events: Event[]
   shifts?: ShiftInfo[] // Optional shift info for authenticated users
   userStatus?: UserStatus | null // User status for induction checking
-  onSelectSlot?: (slotInfo: SlotInfo) => void
+  termWeeks?: TermWeek[]
+  onDateClick?: (date: Date) => void
   onSelectEvent?: (event: CalendarEvent) => void
-  selectable?: boolean
   defaultDate?: Date
   minDate?: Date
   maxDate?: Date
@@ -100,13 +100,24 @@ interface EventsCalendarProps {
   agendaLength?: number // Number of days to show in agenda view
 }
 
+// Abbreviate term names: "0th Week, Hilary Term" -> "HT0"
+// Only show weeks 0-8 (Full Term); vacation weeks are filtered out
+function abbreviateTermWeek(summary: string): string {
+  const match = summary.match(/(-?\d+)\w*\s+Week,?\s+(Michaelmas|Hilary|Trinity)\s+Term/i)
+  if (!match) return ''
+  const week = parseInt(match[1], 10)
+  if (week < 0 || week > 8) return ''
+  const term = match[2][0] + 'T' // MT, HT, TT
+  return `${term}${week}`
+}
+
 export default function EventsCalendar({
   events,
   shifts,
   userStatus,
-  onSelectSlot,
+  termWeeks,
+  onDateClick,
   onSelectEvent,
-  selectable = false,
   defaultDate = new Date(),
   minDate,
   maxDate,
@@ -123,6 +134,20 @@ export default function EventsCalendar({
 
   const [currentDate, setCurrentDate] = useState(defaultDate)
   const [view, setView] = useState<'month' | 'agenda'>(getInitialView())
+
+  // Build date -> term week abbreviation lookup
+  const termWeekByDate = new Map<string, string>()
+  if (termWeeks) {
+    for (const tw of termWeeks) {
+      const abbr = abbreviateTermWeek(tw.summary)
+      if (!abbr) continue
+      const start = new Date(tw.start_date + 'T00:00:00')
+      const end = new Date(tw.end_date + 'T00:00:00')
+      for (let d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
+        termWeekByDate.set(format(d, 'yyyy-MM-dd'), abbr)
+      }
+    }
+  }
 
   // Create a map of date -> shift info for quick lookup
   const shiftsByDate = new Map<string, ShiftInfo>()
@@ -233,14 +258,35 @@ export default function EventsCalendar({
           view={view}
           onView={(newView) => setView(newView as 'month' | 'agenda')}
           views={['month', 'agenda']}
-          selectable={selectable}
-          onSelectSlot={onSelectSlot}
           onSelectEvent={onSelectEvent}
           min={minDate}
           max={maxDate}
           length={agendaLength}
           components={{
             toolbar: CustomToolbar,
+            dateCellWrapper: onDateClick
+              ? ({ children, value }: { children: React.ReactNode; value: Date }) => (
+                  <div style={{ flex: 1, display: 'flex', cursor: 'pointer' }} onClick={() => onDateClick(value)}>
+                    {children}
+                  </div>
+                )
+              : undefined,
+            month: {
+              dateHeader: ({ date, label }: { date: Date; label: string }) => {
+                const dateStr = format(date, 'yyyy-MM-dd')
+                const termLabel = termWeekByDate.get(dateStr)
+                return (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 4px' }}>
+                    {termLabel && (
+                      <span style={{ fontSize: '9px', color: '#002147', opacity: 0.6, fontWeight: 500 }}>
+                        {termLabel}
+                      </span>
+                    )}
+                    <span style={{ marginLeft: 'auto' }}>{label}</span>
+                  </div>
+                )
+              },
+            },
           }}
           style={{ height: '100%' }}
           formats={{
