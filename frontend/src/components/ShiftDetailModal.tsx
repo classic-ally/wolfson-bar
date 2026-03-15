@@ -1,16 +1,27 @@
-import { useState } from 'react'
-import { ShiftInfo, signupForShift, cancelShiftSignup, getUserId, UserStatus } from '../lib/auth'
+import { useState, useEffect } from 'react'
+import { ShiftInfo, signupForShift, cancelShiftSignup, removeUserFromShift, getUserId, UserStatus, ActiveMember, getActiveMembers, assignUserToShift } from '../lib/auth'
 
 interface ShiftDetailModalProps {
   shift: ShiftInfo | null
   userStatus: UserStatus | null
+  isCommittee?: boolean
   onClose: () => void
   onUpdate: () => void
 }
 
-export default function ShiftDetailModal({ shift, userStatus, onClose, onUpdate }: ShiftDetailModalProps) {
+export default function ShiftDetailModal({ shift, userStatus, isCommittee, onClose, onUpdate }: ShiftDetailModalProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [activeMembers, setActiveMembers] = useState<ActiveMember[]>([])
+  const [selectedUserId, setSelectedUserId] = useState<string>('')
+  const [assignLoading, setAssignLoading] = useState(false)
+  const [removeLoading, setRemoveLoading] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (shift && isCommittee) {
+      getActiveMembers().then(setActiveMembers).catch(() => {})
+    }
+  }, [shift, isCommittee])
 
   if (!shift) return null
 
@@ -34,6 +45,35 @@ export default function ShiftDetailModal({ shift, userStatus, onClose, onUpdate 
       setError(err instanceof Error ? err.message : 'Failed to sign up')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleAssign = async () => {
+    if (!selectedUserId || !shift) return
+    setAssignLoading(true)
+    setError(null)
+    try {
+      await assignUserToShift(shift.date, selectedUserId)
+      setSelectedUserId('')
+      onUpdate()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to assign user')
+    } finally {
+      setAssignLoading(false)
+    }
+  }
+
+  const handleRemove = async (userId: string) => {
+    if (!shift || !confirm('Remove this user from the shift?')) return
+    setRemoveLoading(userId)
+    setError(null)
+    try {
+      await removeUserFromShift(shift.date, userId)
+      onUpdate()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove user')
+    } finally {
+      setRemoveLoading(null)
     }
   }
 
@@ -133,14 +173,83 @@ export default function ShiftDetailModal({ shift, userStatus, onClose, onUpdate 
             <strong>Signed up:</strong>
             <ul style={{ margin: '8px 0', paddingLeft: '20px' }}>
               {shift.signups.map((signup) => (
-                <li key={signup.user_id}>
-                  {signup.display_name || 'Unknown'}
-                  {signup.user_id === currentUserId && (
-                    <span style={{ color: '#8B0000', marginLeft: '5px' }}>(You)</span>
+                <li key={signup.user_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <span>
+                    {signup.display_name || 'Unknown'}
+                    {signup.user_id === currentUserId && (
+                      <span style={{ color: '#8B0000', marginLeft: '5px' }}>(You)</span>
+                    )}
+                  </span>
+                  {isCommittee && (
+                    <button
+                      onClick={() => handleRemove(signup.user_id)}
+                      disabled={removeLoading === signup.user_id}
+                      style={{
+                        padding: '2px 8px',
+                        backgroundColor: '#dc3545',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '3px',
+                        fontSize: '12px',
+                        cursor: removeLoading === signup.user_id ? 'not-allowed' : 'pointer',
+                        opacity: removeLoading === signup.user_id ? 0.6 : 1,
+                        marginLeft: '8px',
+                      }}
+                    >
+                      {removeLoading === signup.user_id ? '...' : 'Remove'}
+                    </button>
                   )}
                 </li>
               ))}
             </ul>
+          </div>
+        )}
+
+        {isCommittee && shift && (
+          <div style={{ marginBottom: '20px', padding: '15px', backgroundColor: '#fff3cd', borderRadius: '4px', border: '1px solid #ffc107' }}>
+            <strong style={{ display: 'block', marginBottom: '8px' }}>Committee: Assign Member</strong>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <select
+                value={selectedUserId}
+                onChange={(e) => setSelectedUserId(e.target.value)}
+                style={{
+                  flex: 1,
+                  padding: '8px',
+                  borderRadius: '4px',
+                  border: '1px solid #ccc',
+                }}
+              >
+                <option value="">Select a member...</option>
+                {activeMembers
+                  .filter(m => !shift.signups.some(s => s.user_id === m.user_id))
+                  .map(m => (
+                    <option
+                      key={m.user_id}
+                      value={m.user_id}
+                      disabled={shift.requires_contract && !m.has_contract}
+                    >
+                      {m.display_name || m.user_id}
+                      {shift.requires_contract && !m.has_contract ? ' (no contract)' : ''}
+                    </option>
+                  ))}
+              </select>
+              <button
+                onClick={handleAssign}
+                disabled={!selectedUserId || assignLoading || isFull}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#002147',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: !selectedUserId || assignLoading || isFull ? 'not-allowed' : 'pointer',
+                  opacity: !selectedUserId || assignLoading || isFull ? 0.6 : 1,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {assignLoading ? 'Assigning...' : 'Assign'}
+              </button>
+            </div>
           </div>
         )}
 

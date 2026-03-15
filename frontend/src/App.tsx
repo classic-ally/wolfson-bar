@@ -24,7 +24,7 @@ import MenuPage from './components/MenuPage'
 import EventsCalendar from './components/EventsCalendar'
 import ShiftDetailModal from './components/ShiftDetailModal'
 import ProtectedRoute from './components/ProtectedRoute'
-import { isLoggedIn, getEvents, Event, getShifts, ShiftInfo, getUserStatus, UserStatus, getTermWeeks, TermWeek } from './lib/auth'
+import { isLoggedIn, isCommittee, getEvents, Event, getShifts, ShiftInfo, getUserStatus, UserStatus, getTermWeeks, TermWeek } from './lib/auth'
 
 // Helper to get date range for events (3 months before to 3 months after current month)
 function getEventsDateRange() {
@@ -143,6 +143,16 @@ function EventsPage() {
     }
   }, [])
 
+  // Keep selectedShift in sync when shifts data refreshes
+  useEffect(() => {
+    if (selectedShift) {
+      const updated = shifts.find(s => s.date === selectedShift.date)
+      if (updated) {
+        setSelectedShift(updated)
+      }
+    }
+  }, [shifts])
+
   const loadUserStatus = async () => {
     try {
       const status = await getUserStatus()
@@ -247,6 +257,7 @@ function EventsPage() {
       <ShiftDetailModal
         shift={selectedShift}
         userStatus={userStatus}
+        isCommittee={isCommittee()}
         onClose={handleCloseModal}
         onUpdate={handleShiftUpdate}
       />

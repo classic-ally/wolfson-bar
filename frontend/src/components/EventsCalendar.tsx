@@ -276,7 +276,10 @@ export default function EventsCalendar({
                 const dateStr = format(date, 'yyyy-MM-dd')
                 const termLabel = termWeekByDate.get(dateStr)
                 return (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 4px' }}>
+                  <div
+                    style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 4px', cursor: onDateClick ? 'pointer' : undefined }}
+                    onClick={onDateClick ? () => onDateClick(date) : undefined}
+                  >
                     {termLabel && (
                       <span style={{ fontSize: '9px', color: '#002147', opacity: 0.6, fontWeight: 500 }}>
                         {termLabel}

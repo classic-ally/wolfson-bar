@@ -539,6 +539,7 @@ pub struct UserListItem {
     pub display_name: Option<String>,
     pub is_committee: bool,
     pub is_admin: bool,
+    pub induction_completed: bool,
     pub created_at: String,
 }
 
@@ -573,6 +574,7 @@ pub async fn get_all_users(
             display_name: u.display_name,
             is_committee: u.is_committee,
             is_admin: u.is_admin,
+            induction_completed: u.induction_completed,
             created_at: u.created_at,
         })
         .collect();
@@ -798,5 +800,40 @@ pub async fn delete_user(
 
     info!("✅ User {} deleted", target_user_id);
 
+    Ok(StatusCode::OK)
+}
+
+/// Mark a user's induction as complete (admin only)
+pub async fn admin_mark_induction(
+    State(state): State<AppState>,
+    AdminUser(admin): AdminUser,
+    Path(target_user_id): Path<String>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    info!("✅ Admin {} marking induction complete for user {}", admin.id, target_user_id);
+
+    let result = sqlx::query("UPDATE users SET induction_completed = TRUE WHERE id = ?")
+        .bind(&target_user_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            error!("❌ Failed to mark induction: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to mark induction complete".to_string(),
+                }),
+            )
+        })?;
+
+    if result.rows_affected() == 0 {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "User not found".to_string(),
+            }),
+        ));
+    }
+
+    info!("✅ Induction marked complete for user {}", target_user_id);
     Ok(StatusCode::OK)
 }

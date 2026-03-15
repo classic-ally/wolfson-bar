@@ -556,6 +556,34 @@ export async function signupForShift(date: string): Promise<void> {
 }
 
 /**
+ * Assign a user to a shift (committee only)
+ */
+export async function assignUserToShift(date: string, userId: string): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/shifts/${date}/${userId}`, {
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to assign user to shift')
+  }
+}
+
+/**
+ * Remove a user from a shift (committee only)
+ */
+export async function removeUserFromShift(date: string, userId: string): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/shifts/${date}/${userId}`, {
+    method: 'DELETE',
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to remove user from shift')
+  }
+}
+
+/**
  * Cancel shift signup (authenticated)
  */
 export async function cancelShiftSignup(date: string): Promise<void> {
@@ -790,6 +818,7 @@ export interface UserListItem {
   display_name: string | null
   is_committee: boolean
   is_admin: boolean
+  induction_completed: boolean
   created_at: string
 }
 
@@ -834,6 +863,20 @@ export async function demoteUser(userId: string): Promise<void> {
   if (!response.ok) {
     const error = await response.json()
     throw new AuthError(error.error || 'Failed to demote user')
+  }
+}
+
+/**
+ * Mark a user's induction as complete (admin only)
+ */
+export async function markInduction(userId: string): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/users/${userId}/mark-induction`, {
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to mark induction complete')
   }
 }
 

@@ -465,6 +465,164 @@ pub async fn get_my_shifts(
     Ok(Json(user_shifts))
 }
 
+// Committee: Assign user to shift (committee only)
+pub async fn admin_assign_to_shift(
+    State(state): State<AppState>,
+    CommitteeUser(committee_user): CommitteeUser,
+    Path((date, target_user_id)): Path<(String, String)>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    info!("➕ Committee member {} assigning user {} to shift on {}", committee_user.id, target_user_id, date);
+
+    // Validate date format
+    chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+        .map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "Invalid date format".to_string(),
+                }),
+            )
+        })?;
+
+    // Get all events for this date to check requirements
+    #[derive(sqlx::FromRow)]
+    struct EventRequirements {
+        shift_max_volunteers: Option<i32>,
+        shift_requires_contract: Option<bool>,
+    }
+
+    let events = sqlx::query_as::<_, EventRequirements>(
+        "SELECT shift_max_volunteers, shift_requires_contract
+         FROM events WHERE event_date = ?"
+    )
+    .bind(&date)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        error!("❌ Failed to fetch events: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "Failed to fetch events".to_string(),
+            }),
+        )
+    })?;
+
+    let mut requires_contract = DEFAULT_SHIFT_REQUIRES_CONTRACT;
+    let mut max_volunteers = DEFAULT_SHIFT_MAX_VOLUNTEERS;
+
+    for event in &events {
+        if let Some(event_max) = event.shift_max_volunteers {
+            if event_max > max_volunteers {
+                max_volunteers = event_max;
+            }
+        }
+        if let Some(true) = event.shift_requires_contract {
+            requires_contract = true;
+        }
+    }
+
+    // Check target user's contract status if required
+    if requires_contract {
+        #[derive(sqlx::FromRow)]
+        struct UserContractRow {
+            has_contract: bool,
+        }
+
+        let target_user = sqlx::query_as::<_, UserContractRow>(
+            "SELECT has_contract FROM users WHERE id = ?"
+        )
+        .bind(&target_user_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| {
+            error!("❌ Failed to fetch target user: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to fetch user".to_string(),
+                }),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: "User not found".to_string(),
+                }),
+            )
+        })?;
+
+        if !target_user.has_contract {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(ErrorResponse {
+                    error: "This shift requires a valid contract and the target user does not have one".to_string(),
+                }),
+            ));
+        }
+    }
+
+    // Check if shift is full
+    #[derive(sqlx::FromRow)]
+    struct CountRow {
+        count: i32,
+    }
+
+    let current_signups = sqlx::query_as::<_, CountRow>(
+        "SELECT COUNT(*) as count FROM shift_signups WHERE shift_date = ?"
+    )
+    .bind(&date)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        error!("❌ Failed to count signups: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "Failed to count signups".to_string(),
+            }),
+        )
+    })?;
+
+    if current_signups.count >= max_volunteers {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(ErrorResponse {
+                error: "This shift is already full".to_string(),
+            }),
+        ));
+    }
+
+    // Insert signup
+    sqlx::query("INSERT INTO shift_signups (shift_date, user_id) VALUES (?, ?)")
+        .bind(&date)
+        .bind(&target_user_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            error!("❌ Failed to assign user to shift: {}", e);
+            if e.to_string().contains("UNIQUE constraint failed") {
+                (
+                    StatusCode::CONFLICT,
+                    Json(ErrorResponse {
+                        error: "User is already signed up for this shift".to_string(),
+                    }),
+                )
+            } else {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: "Failed to assign user to shift".to_string(),
+                    }),
+                )
+            }
+        })?;
+
+    info!("✅ Committee member {} assigned user {} to shift on {}", committee_user.id, target_user_id, date);
+    Ok(StatusCode::OK)
+}
+
 // Committee: Remove user from shift (committee only)
 pub async fn admin_remove_from_shift(
     State(state): State<AppState>,

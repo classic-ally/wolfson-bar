@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getAllUsers, promoteUser, demoteUser, deleteUser, UserListItem, getUserId } from '../../lib/auth'
+import { getAllUsers, promoteUser, demoteUser, deleteUser, markInduction, UserListItem, getUserId } from '../../lib/auth'
 import { usePageTitle } from '../../hooks/usePageTitle'
 
 export default function AdminUsers() {
@@ -80,6 +80,21 @@ export default function AdminUsers() {
     } catch (err) {
       console.error('Failed to delete user:', err)
       alert(err instanceof Error ? err.message : 'Failed to delete user')
+    } finally {
+      setActionInProgress(null)
+    }
+  }
+
+  const handleMarkInduction = async (userId: string) => {
+    if (!confirm('Mark this user\'s induction as complete?')) return
+
+    setActionInProgress(userId)
+    try {
+      await markInduction(userId)
+      await loadUsers()
+    } catch (err) {
+      console.error('Failed to mark induction:', err)
+      alert(err instanceof Error ? err.message : 'Failed to mark induction complete')
     } finally {
       setActionInProgress(null)
     }
@@ -217,6 +232,24 @@ export default function AdminUsers() {
                         title={isLastAdmin(user) ? 'Cannot demote the last admin' : ''}
                       >
                         Demote
+                      </button>
+                    )}
+                    {!user.induction_completed && (
+                      <button
+                        onClick={() => handleMarkInduction(user.id)}
+                        disabled={actionInProgress === user.id}
+                        style={{
+                          padding: '6px 12px',
+                          backgroundColor: '#17a2b8',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: actionInProgress === user.id ? 'not-allowed' : 'pointer',
+                          opacity: actionInProgress === user.id ? 0.7 : 1,
+                        }}
+                        title="Mark induction as complete"
+                      >
+                        Mark Inducted
                       </button>
                     )}
                     {user.id !== currentUserId && (
