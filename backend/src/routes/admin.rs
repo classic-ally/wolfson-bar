@@ -187,10 +187,9 @@ pub async fn verify_induction(
     }
 
     // Verify JWT and extract user_id
-    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "your-secret-key".to_string());
     let token_data = decode::<Claims>(
         jwt,
-        &DecodingKey::from_secret(secret.as_ref()),
+        &DecodingKey::from_secret(&state.jwt_secret),
         &Validation::default(),
     )
     .map_err(|e| {

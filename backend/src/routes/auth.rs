@@ -17,6 +17,7 @@ use crate::models::{AuthResponse, ErrorResponse, RegisterStartRequest, User};
 pub struct AppState {
     pub db: SqlitePool,
     pub webauthn: Webauthn,
+    pub jwt_secret: Vec<u8>,
 }
 
 // Registration Start - Generate challenge
@@ -175,7 +176,7 @@ pub async fn register_finish(
         })?;
 
     // Generate JWT
-    let token = create_jwt_token(&user.id).map_err(|e| {
+    let token = create_jwt_token(&user.id, &state.jwt_secret).map_err(|e| {
         error!("❌ Failed to create JWT: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -375,7 +376,7 @@ pub async fn login_finish(
     info!("✨ Found matching user: {}", user.id);
 
     // Generate JWT
-    let token = create_jwt_token(&user.id).map_err(|e| {
+    let token = create_jwt_token(&user.id, &state.jwt_secret).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse {

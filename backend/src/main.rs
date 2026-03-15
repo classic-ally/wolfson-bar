@@ -14,9 +14,11 @@ use routes::admin::{get_pending_certificates, get_certificate, approve_certifica
 use routes::events::{get_events, get_event, create_event, update_event, delete_event};
 use routes::shifts::{get_shifts, signup_for_shift, cancel_shift_signup, get_my_shifts, admin_remove_from_shift};
 use routes::calendar::{get_calendar_feed, download_event, get_user_calendar};
+#[cfg(debug_assertions)]
 use routes::local::generate_jwt;
 use routes::stock::{create_product, lookup_barcode, add_barcode, create_transactions, get_products};
 use sqlx::sqlite::SqlitePoolOptions;
+use rand::Rng;
 use std::net::SocketAddr;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
@@ -34,75 +36,25 @@ async fn main() {
         .await
         .expect("Failed to connect to database");
 
-    // Run migrations
-    sqlx::query(&std::fs::read_to_string("migrations/001_init.sql").expect("Failed to read migration"))
-        .execute(&db)
-        .await
-        .expect("Failed to run migrations");
+    // Run embedded migrations
+    let migrations: &[(&str, &str, &[&str])] = &[
+        ("001_init", include_str!("../migrations/001_init.sql"), &[]),
+        ("002_events", include_str!("../migrations/002_events.sql"), &[]),
+        ("003_shifts", include_str!("../migrations/003_shifts.sql"), &["duplicate column"]),
+        ("004_calendar", include_str!("../migrations/004_calendar.sql"), &["duplicate column", "already exists"]),
+        ("005_stock", include_str!("../migrations/005_stock.sql"), &["already exists"]),
+        ("006_certificate_type", include_str!("../migrations/006_certificate_type.sql"), &["duplicate column"]),
+        ("007_admin_role", include_str!("../migrations/007_admin_role.sql"), &["duplicate column"]),
+    ];
 
-    sqlx::query(&std::fs::read_to_string("migrations/002_events.sql").expect("Failed to read migration"))
-        .execute(&db)
-        .await
-        .expect("Failed to run events migration");
-
-    // Run shifts migration (ignore duplicate column errors for idempotency)
-    if let Err(e) = sqlx::query(&std::fs::read_to_string("migrations/003_shifts.sql").expect("Failed to read migration"))
-        .execute(&db)
-        .await
-    {
-        // Ignore "duplicate column" errors - migration already ran
-        if !e.to_string().contains("duplicate column") {
-            panic!("Failed to run shifts migration: {}", e);
+    for (name, sql, ignorable_errors) in migrations {
+        match sqlx::query(sql).execute(&db).await {
+            Ok(_) => tracing::info!("Migration {} applied", name),
+            Err(e) if ignorable_errors.iter().any(|ie| e.to_string().contains(ie)) => {
+                tracing::info!("Migration {} already applied", name);
+            }
+            Err(e) => panic!("Failed to run migration {}: {}", name, e),
         }
-        tracing::info!("Shifts migration already applied (ignoring duplicate column error)");
-    }
-
-    // Run calendar migration (ignore duplicate errors for idempotency)
-    if let Err(e) = sqlx::query(&std::fs::read_to_string("migrations/004_calendar.sql").expect("Failed to read migration"))
-        .execute(&db)
-        .await
-    {
-        // Ignore errors if already applied
-        if !e.to_string().contains("duplicate column") && !e.to_string().contains("already exists") {
-            panic!("Failed to run calendar migration: {}", e);
-        }
-        tracing::info!("Calendar migration already applied (ignoring duplicate errors)");
-    }
-
-    // Run stock management migration (ignore duplicate errors for idempotency)
-    if let Err(e) = sqlx::query(&std::fs::read_to_string("migrations/005_stock.sql").expect("Failed to read migration"))
-        .execute(&db)
-        .await
-    {
-        // Ignore errors if already applied
-        if !e.to_string().contains("already exists") {
-            panic!("Failed to run stock migration: {}", e);
-        }
-        tracing::info!("Stock migration already applied (ignoring duplicate errors)");
-    }
-
-    // Run certificate type migration (ignore duplicate errors for idempotency)
-    if let Err(e) = sqlx::query(&std::fs::read_to_string("migrations/006_certificate_type.sql").expect("Failed to read migration"))
-        .execute(&db)
-        .await
-    {
-        // Ignore errors if already applied
-        if !e.to_string().contains("duplicate column") {
-            panic!("Failed to run certificate type migration: {}", e);
-        }
-        tracing::info!("Certificate type migration already applied (ignoring duplicate errors)");
-    }
-
-    // Run admin role migration (ignore duplicate errors for idempotency)
-    if let Err(e) = sqlx::query(&std::fs::read_to_string("migrations/007_admin_role.sql").expect("Failed to read migration"))
-        .execute(&db)
-        .await
-    {
-        // Ignore errors if already applied
-        if !e.to_string().contains("duplicate column") {
-            panic!("Failed to run admin role migration: {}", e);
-        }
-        tracing::info!("Admin role migration already applied (ignoring duplicate errors)");
     }
 
     // Get public URL from environment (required)
@@ -115,8 +67,12 @@ async fn main() {
     let builder = WebauthnBuilder::new(rp_id, &rp_origin).expect("Invalid WebAuthn configuration");
     let webauthn = builder.build().expect("Failed to build Webauthn");
 
+    // Generate random JWT secret (invalidates all sessions on restart)
+    let jwt_secret: Vec<u8> = rand::thread_rng().gen::<[u8; 32]>().to_vec();
+    tracing::info!("Generated random JWT secret for this session");
+
     // App state
-    let state = AppState { db, webauthn };
+    let state = AppState { db, webauthn, jwt_secret };
 
     // CORS setup for local development
     let cors = CorsLayer::new()
@@ -177,12 +133,16 @@ async fn main() {
         .route("/api/admin/users/:user_id/promote", post(promote_user))
         .route("/api/admin/users/:user_id/demote", post(demote_user))
         .route("/api/admin/users/:user_id", axum::routing::delete(delete_user))
-        // Localhost-only endpoints for development
-        .route("/api/local/jwt/:user_id", get(generate_jwt))
-        .layer(cors)
-        .with_state(state)
-        // Serve static files (must be last to act as catch-all)
-        .fallback_service(serve_dir);
+        ;
+        // Debug-only endpoint for generating JWTs for any user
+        #[cfg(debug_assertions)]
+        let app = app.route("/api/local/jwt/:user_id", get(generate_jwt));
+
+        let app = app
+            .layer(cors)
+            .with_state(state)
+            // Serve static files (must be last to act as catch-all)
+            .fallback_service(serve_dir);
 
     // Start server
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));

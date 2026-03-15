@@ -12,8 +12,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::models::{ErrorResponse, User};
 use crate::routes::auth::AppState;
 
-const JWT_SECRET: &[u8] = b"your-secret-key-change-this-in-production";
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String, // user_id
@@ -21,7 +19,7 @@ pub struct Claims {
     pub iat: usize,  // issued at
 }
 
-pub fn create_jwt_token(user_id: &str) -> Result<String, jsonwebtoken::errors::Error> {
+pub fn create_jwt_token(user_id: &str, secret: &[u8]) -> Result<String, jsonwebtoken::errors::Error> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -36,14 +34,14 @@ pub fn create_jwt_token(user_id: &str) -> Result<String, jsonwebtoken::errors::E
     encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(JWT_SECRET),
+        &EncodingKey::from_secret(secret),
     )
 }
 
-pub fn verify_jwt_token(token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
+pub fn verify_jwt_token(token: &str, secret: &[u8]) -> Result<Claims, jsonwebtoken::errors::Error> {
     let token_data = decode::<Claims>(
         token,
-        &DecodingKey::from_secret(JWT_SECRET),
+        &DecodingKey::from_secret(secret),
         &Validation::default(),
     )?;
 
@@ -51,9 +49,9 @@ pub fn verify_jwt_token(token: &str) -> Result<Claims, jsonwebtoken::errors::Err
 }
 
 // Helper to extract user_id from Authorization header
-pub fn extract_user_id_from_header(auth_header: Option<&str>) -> Option<String> {
+pub fn extract_user_id_from_header(auth_header: Option<&str>, secret: &[u8]) -> Option<String> {
     let token = auth_header?.strip_prefix("Bearer ")?;
-    let claims = verify_jwt_token(token).ok()?;
+    let claims = verify_jwt_token(token, secret).ok()?;
     Some(claims.sub)
 }
 
@@ -71,7 +69,7 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let user = extract_user_from_request(parts, &state.db).await?;
+        let user = extract_user_from_request(parts, &state.db, &state.jwt_secret).await?;
         Ok(AuthenticatedUser(user))
     }
 }
@@ -87,7 +85,7 @@ impl FromRequestParts<AppState> for CommitteeUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let user = extract_user_from_request(parts, &state.db).await?;
+        let user = extract_user_from_request(parts, &state.db, &state.jwt_secret).await?;
 
         if !user.is_committee {
             return Err((
@@ -113,7 +111,7 @@ impl FromRequestParts<AppState> for AdminUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let user = extract_user_from_request(parts, &state.db).await?;
+        let user = extract_user_from_request(parts, &state.db, &state.jwt_secret).await?;
 
         if !user.is_admin {
             return Err((
@@ -132,6 +130,7 @@ impl FromRequestParts<AppState> for AdminUser {
 async fn extract_user_from_request(
     parts: &Parts,
     db: &SqlitePool,
+    jwt_secret: &[u8],
 ) -> Result<User, (StatusCode, Json<ErrorResponse>)> {
     // Get auth header
     let auth_header = parts
@@ -140,7 +139,7 @@ async fn extract_user_from_request(
         .and_then(|h| h.to_str().ok());
 
     // Extract user_id from JWT
-    let user_id = extract_user_id_from_header(auth_header).ok_or_else(|| {
+    let user_id = extract_user_id_from_header(auth_header, jwt_secret).ok_or_else(|| {
         (
             StatusCode::UNAUTHORIZED,
             Json(ErrorResponse {

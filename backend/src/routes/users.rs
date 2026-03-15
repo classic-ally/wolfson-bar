@@ -260,6 +260,7 @@ pub struct VerificationToken {
 
 // Generate verification token for QR code
 pub async fn get_verification_token(
+    State(state): State<AppState>,
     AuthenticatedUser(user): AuthenticatedUser,
     Query(params): Query<VerificationQuery>,
 ) -> Result<Json<VerificationToken>, (StatusCode, Json<ErrorResponse>)> {
@@ -290,11 +291,10 @@ pub async fn get_verification_token(
     };
 
     // Encode verification type in the token
-    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "your-secret-key".to_string());
     let token = encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(secret.as_ref()),
+        &EncodingKey::from_secret(&state.jwt_secret),
     )
     .map_err(|e| {
         error!("❌ Failed to create token: {}", e);

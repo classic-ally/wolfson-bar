@@ -52,7 +52,7 @@ pub async fn generate_jwt(
         })?;
 
     // Generate JWT
-    let token = create_jwt_token(&user_id).map_err(|e| {
+    let token = create_jwt_token(&user_id, &state.jwt_secret).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse {

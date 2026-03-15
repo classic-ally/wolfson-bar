@@ -312,7 +312,7 @@ pub async fn create_transactions(
     let auth_header = headers.get("authorization")
         .and_then(|h| h.to_str().ok());
 
-    let user_id = extract_user_id_from_header(auth_header).ok_or_else(|| {
+    let user_id = extract_user_id_from_header(auth_header, &state.jwt_secret).ok_or_else(|| {
         error!("Unauthorized access to create_transactions");
         (
             StatusCode::UNAUTHORIZED,
