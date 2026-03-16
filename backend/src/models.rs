@@ -8,6 +8,8 @@ use uuid::Uuid;
 #[ts(export, export_to = "../frontend/src/types/")]
 pub struct RegisterStartRequest {
     pub display_name: String,
+    #[serde(default)]
+    pub email: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, TS)]
@@ -30,7 +32,8 @@ pub struct ErrorResponse {
 pub struct User {
     pub id: String,
     pub display_name: Option<String>,
-    pub passkey_credential: String,
+    #[sqlx(default)]
+    pub passkey_credential: Option<String>,
     pub is_committee: bool,
     #[sqlx(default)]
     pub is_admin: bool,
@@ -44,6 +47,12 @@ pub struct User {
     pub has_contract: bool,
     pub contract_expiry_date: Option<String>,
     pub created_at: String,
+    #[sqlx(default)]
+    pub email: Option<String>,
+    #[sqlx(default)]
+    pub email_notifications_enabled: bool,
+    #[sqlx(default)]
+    pub privacy_consent_given: bool,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -68,7 +77,7 @@ pub struct Event {
 }
 
 impl User {
-    pub fn new(display_name: Option<String>, passkey_credential: String, is_committee: bool, is_admin: bool) -> Self {
+    pub fn new(display_name: Option<String>, passkey_credential: Option<String>, is_committee: bool, is_admin: bool) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
             display_name,
@@ -83,6 +92,9 @@ impl User {
             has_contract: false,
             contract_expiry_date: None,
             created_at: chrono::Utc::now().to_rfc3339(),
+            email: None,
+            email_notifications_enabled: false,
+            privacy_consent_given: false,
         }
     }
 }

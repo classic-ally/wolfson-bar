@@ -19,13 +19,13 @@ export class AuthError extends Error {
 /**
  * Register a new user with a passkey
  */
-export async function registerWithPasskey(displayName: string): Promise<AuthResponse> {
+export async function registerWithPasskey(displayName: string, email?: string): Promise<AuthResponse> {
   try {
     // 1. Start registration - get challenge from backend
     const startResponse = await fetch(`${API_BASE}/api/auth/register/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ display_name: displayName }),
+      body: JSON.stringify({ display_name: displayName, email: email || null }),
     })
 
     if (!startResponse.ok) {
@@ -215,6 +215,9 @@ export interface UserStatus {
   induction_completed: boolean
   has_contract: boolean
   contract_expiry_date: string | null
+  email: string | null
+  email_notifications_enabled: boolean
+  privacy_consent_given: boolean
 }
 
 /**
@@ -698,6 +701,114 @@ export async function getMyOverview(): Promise<UserOverview> {
   }
 
   return response.json()
+}
+
+// ===== Email & Privacy =====
+
+/**
+ * Update user email
+ */
+export async function updateEmail(email: string | null): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/users/me/email`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to update email')
+  }
+}
+
+/**
+ * Toggle email notifications
+ */
+export async function updateEmailNotifications(enabled: boolean): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/users/me/email-notifications`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to update notification settings')
+  }
+}
+
+/**
+ * Accept privacy notice
+ */
+export async function acceptPrivacy(): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/users/me/accept-privacy`, {
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to accept privacy notice')
+  }
+}
+
+/**
+ * Export all user data (GDPR)
+ */
+export async function exportMyData(): Promise<object> {
+  const response = await authenticatedFetch(`${API_BASE}/api/users/me/data`)
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to export data')
+  }
+
+  return response.json()
+}
+
+/**
+ * Delete own account (GDPR)
+ */
+export async function deleteMyAccount(): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/users/me`, {
+    method: 'DELETE',
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to delete account')
+  }
+}
+
+/**
+ * Register with email only (no passkey)
+ */
+export async function registerWithEmail(displayName: string, email: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/auth/register/email`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ display_name: displayName, email }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to register')
+  }
+}
+
+/**
+ * Request magic link login email
+ */
+export async function requestMagicLink(email: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/auth/magic-link/request`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to send magic link')
+  }
 }
 
 // ===== Stock Management =====

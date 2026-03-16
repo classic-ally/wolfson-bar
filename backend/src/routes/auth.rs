@@ -18,6 +18,8 @@ pub struct AppState {
     pub db: SqlitePool,
     pub webauthn: Webauthn,
     pub jwt_secret: Vec<u8>,
+    pub email_service: Option<crate::email::EmailService>,
+    pub public_url: String,
 }
 
 // Registration Start - Generate challenge
@@ -53,11 +55,17 @@ pub async fn register_start(
         )
     })?;
 
+    // Store email alongside display_name by encoding as JSON
+    let registration_meta = serde_json::json!({
+        "name": req.display_name,
+        "email": req.email,
+    }).to_string();
+
     sqlx::query("INSERT INTO auth_states (id, state_type, state_data, display_name) VALUES (?, ?, ?, ?)")
         .bind(&state_id)
         .bind("registration")
         .bind(&state_data)
-        .bind(&req.display_name)
+        .bind(&registration_meta)
         .execute(&state.db)
         .await
         .map_err(|e| {
@@ -97,7 +105,18 @@ pub async fn register_finish(
         )
     })?;
 
-    let display_name = auth_state.1;
+    // Parse display_name field which may be JSON with email, or plain string
+    let (display_name, email) = if let Some(ref meta) = auth_state.1 {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(meta) {
+            let name = parsed.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let email = parsed.get("email").and_then(|v| v.as_str()).map(|s| s.to_string());
+            (name, email)
+        } else {
+            (Some(meta.clone()), None)
+        }
+    } else {
+        (None, None)
+    };
     let reg_state: PasskeyRegistration = serde_json::from_str(&auth_state.0).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -141,17 +160,18 @@ pub async fn register_finish(
     }
 
     // Store user with passkey
-    let user = User::new(
+    let mut user = User::new(
         display_name,
-        serde_json::to_string(&passkey).unwrap(),
+        Some(serde_json::to_string(&passkey).unwrap()),
         is_committee,
         is_admin,
     );
+    user.email = email;
 
     info!("💾 Storing user with ID: {}", user.id);
-    debug!("🔑 Passkey credential: {}", user.passkey_credential);
+    debug!("🔑 Passkey credential: {:?}", user.passkey_credential);
 
-    sqlx::query("INSERT INTO users (id, display_name, passkey_credential, is_committee, is_admin, code_of_conduct_signed, food_safety_completed, food_safety_certificate, induction_completed, has_contract, contract_expiry_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    sqlx::query("INSERT INTO users (id, display_name, passkey_credential, is_committee, is_admin, code_of_conduct_signed, food_safety_completed, food_safety_certificate, induction_completed, has_contract, contract_expiry_date, created_at, email) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(&user.id)
         .bind(&user.display_name)
         .bind(&user.passkey_credential)
@@ -164,6 +184,7 @@ pub async fn register_finish(
         .bind(&user.has_contract)
         .bind(&user.contract_expiry_date)
         .bind(&user.created_at)
+        .bind(&user.email)
         .execute(&state.db)
         .await
         .map_err(|e| {
@@ -228,7 +249,7 @@ pub async fn login_start(
         .iter()
         .filter_map(|u| {
             debug!("🔍 Parsing passkey for user: {}", u.id);
-            serde_json::from_str(&u.passkey_credential).ok()
+            u.passkey_credential.as_deref().and_then(|c| serde_json::from_str(c).ok())
         })
         .collect();
 
@@ -353,13 +374,15 @@ pub async fn login_finish(
     info!("👥 Checking {} users", users.len());
     for u in &users {
         debug!("User {}: checking if credential contains '{}'", u.id, cred_id_str);
-        debug!("  Credential preview: {}...", &u.passkey_credential.chars().take(100).collect::<String>());
+        if let Some(ref cred) = u.passkey_credential {
+            debug!("  Credential preview: {}...", &cred.chars().take(100).collect::<String>());
+        }
     }
 
     let user = users
         .iter()
         .find(|u| {
-            let found = u.passkey_credential.contains(&cred_id_str);
+            let found = u.passkey_credential.as_ref().map_or(false, |c| c.contains(&cred_id_str));
             debug!("User {}: match = {}", u.id, found);
             found
         })
@@ -398,4 +421,109 @@ pub async fn login_finish(
         is_committee: user.is_committee,
         is_admin: user.is_admin,
     }))
+}
+
+// Email-only registration (no passkey)
+#[derive(Debug, serde::Deserialize)]
+pub struct RegisterEmailRequest {
+    pub display_name: String,
+    pub email: String,
+}
+
+pub async fn register_with_email(
+    State(state): State<AppState>,
+    Json(req): Json<RegisterEmailRequest>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    let display_name = req.display_name.trim().to_string();
+    let email = req.email.trim().to_lowercase();
+
+    if display_name.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Display name is required".to_string() })));
+    }
+
+    if !email.contains('@') || email.starts_with('@') || email.ends_with('@') {
+        return Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Invalid email address".to_string() })));
+    }
+
+    // Check email uniqueness
+    let existing: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE email = ?)")
+        .bind(&email)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(false);
+
+    if existing {
+        return Err((StatusCode::CONFLICT, Json(ErrorResponse { error: "An account with this email already exists. Try signing in instead.".to_string() })));
+    }
+
+    let email_service = state.email_service.as_ref().ok_or_else(|| {
+        (StatusCode::SERVICE_UNAVAILABLE, Json(ErrorResponse { error: "Email service not configured".to_string() }))
+    })?;
+
+    // Check if first user
+    let user_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: format!("Database error: {}", e) })))?;
+
+    let is_first_user = user_count.0 == 0;
+
+    // Create user without passkey
+    let user = User::new(
+        Some(display_name),
+        None, // no passkey
+        is_first_user,
+        is_first_user,
+    );
+
+    sqlx::query("INSERT INTO users (id, display_name, passkey_credential, is_committee, is_admin, code_of_conduct_signed, food_safety_completed, food_safety_certificate, induction_completed, has_contract, contract_expiry_date, created_at, email) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(&user.id)
+        .bind(&user.display_name)
+        .bind(&user.passkey_credential)
+        .bind(user.is_committee)
+        .bind(user.is_admin)
+        .bind(user.code_of_conduct_signed)
+        .bind(user.food_safety_completed)
+        .bind(&user.food_safety_certificate)
+        .bind(user.induction_completed)
+        .bind(user.has_contract)
+        .bind(&user.contract_expiry_date)
+        .bind(&user.created_at)
+        .bind(&email)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: format!("Failed to create user: {}", e) })))?;
+
+    info!("📧 Created email-only user: {} ({})", user.id, email);
+
+    // Send magic link so they can sign in immediately
+    let token_bytes: [u8; 32] = rand::random();
+    let token = base64::Engine::encode(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+        token_bytes,
+    );
+
+    let token_id = uuid::Uuid::new_v4().to_string();
+    sqlx::query("INSERT INTO magic_link_tokens (id, email, token) VALUES (?, ?, ?)")
+        .bind(&token_id)
+        .bind(&email)
+        .bind(&token)
+        .execute(&state.db)
+        .await
+        .ok();
+
+    let link = format!("{}/api/auth/magic-link/verify?token={}", state.public_url, token);
+    let html = format!(
+        r#"<h2>Welcome to Wolfson Cellar Bar!</h2>
+        <p>Your account has been created. Click below to sign in:</p>
+        <p><a href="{}" style="display: inline-block; padding: 12px 24px; background-color: #8B0000; color: white; text-decoration: none; border-radius: 4px;">Sign In</a></p>
+        <p style="color: #666; font-size: 12px;">This link expires in 15 minutes.</p>"#,
+        link
+    );
+
+    if let Err(e) = email_service.send_email(&email, "Welcome to Wolfson Cellar Bar", &html, None).await {
+        error!("Failed to send welcome email: {}", e);
+    }
+
+    Ok(StatusCode::OK)
 }

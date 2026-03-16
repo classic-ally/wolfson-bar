@@ -25,6 +25,9 @@ pub struct UserStatus {
     pub induction_completed: bool,
     pub has_contract: bool,
     pub contract_expiry_date: Option<String>,
+    pub email: Option<String>,
+    pub email_notifications_enabled: bool,
+    pub privacy_consent_given: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -61,6 +64,9 @@ pub async fn get_me(
         induction_completed: user.induction_completed,
         has_contract: user.has_contract,
         contract_expiry_date: user.contract_expiry_date,
+        email: user.email,
+        email_notifications_enabled: user.email_notifications_enabled,
+        privacy_consent_given: user.privacy_consent_given,
     }))
 }
 
@@ -399,4 +405,212 @@ pub async fn get_my_overview(
         shifts_next_7_days,
         contract_expiry_date: user.contract_expiry_date,
     }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateEmailRequest {
+    pub email: Option<String>,
+}
+
+/// Update user's email address
+pub async fn update_email(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Json(req): Json<UpdateEmailRequest>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    // Validate email format if provided
+    if let Some(ref email) = req.email {
+        let trimmed = email.trim();
+        if trimmed.is_empty() {
+            // Clear email
+            sqlx::query("UPDATE users SET email = NULL, email_notifications_enabled = FALSE WHERE id = ?")
+                .bind(&user.id)
+                .execute(&state.db)
+                .await
+                .map_err(|e| {
+                    error!("Failed to clear email: {}", e);
+                    (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Failed to update email".to_string() }))
+                })?;
+            return Ok(StatusCode::OK);
+        }
+
+        // Basic email validation: must contain @ with something on each side
+        if !trimmed.contains('@') || trimmed.starts_with('@') || trimmed.ends_with('@') {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse { error: "Invalid email address".to_string() }),
+            ));
+        }
+
+        // Check domain has at least one dot
+        let parts: Vec<&str> = trimmed.split('@').collect();
+        if parts.len() != 2 || !parts[1].contains('.') {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse { error: "Invalid email address".to_string() }),
+            ));
+        }
+
+        // Check uniqueness
+        let existing: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM users WHERE email = ? AND id != ?)"
+        )
+        .bind(trimmed)
+        .bind(&user.id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(false);
+
+        if existing {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(ErrorResponse { error: "Email address already in use".to_string() }),
+            ));
+        }
+
+        info!("Updating email for user {}", user.id);
+        sqlx::query("UPDATE users SET email = ? WHERE id = ?")
+            .bind(trimmed)
+            .bind(&user.id)
+            .execute(&state.db)
+            .await
+            .map_err(|e| {
+                error!("Failed to update email: {}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Failed to update email".to_string() }))
+            })?;
+    } else {
+        // Clear email and disable notifications
+        sqlx::query("UPDATE users SET email = NULL, email_notifications_enabled = FALSE WHERE id = ?")
+            .bind(&user.id)
+            .execute(&state.db)
+            .await
+            .map_err(|e| {
+                error!("Failed to clear email: {}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Failed to update email".to_string() }))
+            })?;
+    }
+
+    Ok(StatusCode::OK)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateEmailNotificationsRequest {
+    pub enabled: bool,
+}
+
+/// Toggle email notifications
+pub async fn update_email_notifications(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Json(req): Json<UpdateEmailNotificationsRequest>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    if req.enabled && user.email.is_none() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse { error: "Cannot enable notifications without an email address".to_string() }),
+        ));
+    }
+
+    sqlx::query("UPDATE users SET email_notifications_enabled = ? WHERE id = ?")
+        .bind(req.enabled)
+        .bind(&user.id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            error!("Failed to update notification settings: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Failed to update settings".to_string() }))
+        })?;
+
+    Ok(StatusCode::OK)
+}
+
+/// Accept privacy notice
+pub async fn accept_privacy(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    sqlx::query("UPDATE users SET privacy_consent_given = TRUE WHERE id = ?")
+        .bind(&user.id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            error!("Failed to update privacy consent: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Failed to accept privacy notice".to_string() }))
+        })?;
+
+    Ok(StatusCode::OK)
+}
+
+/// Self-service account deletion
+pub async fn delete_my_account(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    info!("User {} requesting account deletion", user.id);
+
+    // CASCADE handles shift_signups and email_notification_log
+    sqlx::query("DELETE FROM users WHERE id = ?")
+        .bind(&user.id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            error!("Failed to delete user: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Failed to delete account".to_string() }))
+        })?;
+
+    info!("User {} account deleted", user.id);
+    Ok(StatusCode::OK)
+}
+
+/// Export all user data as JSON
+pub async fn export_my_data(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    // Get shift signups
+    let signups: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT s.shift_date,
+                (SELECT title FROM events WHERE event_date = s.shift_date) as event_title
+         FROM shift_signups s WHERE s.user_id = ? ORDER BY s.shift_date"
+    )
+    .bind(&user.id)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
+    // Get notification log
+    let notifications: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT shift_date, notification_type, sent_at FROM email_notification_log WHERE user_id = ? ORDER BY sent_at"
+    )
+    .bind(&user.id)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
+    let data = serde_json::json!({
+        "profile": {
+            "user_id": user.id,
+            "display_name": user.display_name,
+            "email": user.email,
+            "email_notifications_enabled": user.email_notifications_enabled,
+            "is_committee": user.is_committee,
+            "is_admin": user.is_admin,
+            "code_of_conduct_signed": user.code_of_conduct_signed,
+            "food_safety_completed": user.food_safety_completed,
+            "has_food_safety_certificate": user.food_safety_certificate.is_some(),
+            "induction_completed": user.induction_completed,
+            "has_contract": user.has_contract,
+            "contract_expiry_date": user.contract_expiry_date,
+            "privacy_consent_given": user.privacy_consent_given,
+            "created_at": user.created_at,
+        },
+        "shift_signups": signups.iter().map(|(date, title)| {
+            serde_json::json!({ "date": date, "event_title": title })
+        }).collect::<Vec<_>>(),
+        "notification_log": notifications.iter().map(|(date, ntype, sent)| {
+            serde_json::json!({ "shift_date": date, "type": ntype, "sent_at": sent })
+        }).collect::<Vec<_>>(),
+    });
+
+    Ok(Json(data))
 }

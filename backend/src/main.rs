@@ -1,6 +1,9 @@
 mod auth;
 mod constants;
+mod email;
+mod ical;
 mod models;
+mod notifications;
 mod routes;
 
 use axum::{
@@ -8,8 +11,9 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use routes::auth::{login_finish, login_start, register_finish, register_start, AppState};
-use routes::users::{get_me, accept_coc, upload_certificate, get_verification_token, update_display_name, submit_contract_request, get_my_overview};
+use routes::auth::{login_finish, login_start, register_finish, register_start, register_with_email, AppState};
+use routes::users::{get_me, accept_coc, upload_certificate, get_verification_token, update_display_name, submit_contract_request, get_my_overview, update_email, update_email_notifications, delete_my_account, export_my_data, accept_privacy};
+use routes::magic_link::{request_magic_link, verify_magic_link};
 use routes::admin::{get_pending_certificates, get_certificate, approve_certificate, verify_induction, get_active_members, get_pending_contracts, approve_contract, get_bar_hours, update_bar_hours, get_overview_stats, get_all_users, promote_user, demote_user, delete_user, admin_mark_induction};
 use routes::events::{get_events, get_event, create_event, update_event, delete_event};
 use routes::shifts::{get_shifts, signup_for_shift, cancel_shift_signup, get_my_shifts, admin_assign_to_shift, admin_remove_from_shift};
@@ -46,6 +50,8 @@ async fn main() {
         ("005_stock", include_str!("../migrations/005_stock.sql"), &["already exists"]),
         ("006_certificate_type", include_str!("../migrations/006_certificate_type.sql"), &["duplicate column"]),
         ("007_admin_role", include_str!("../migrations/007_admin_role.sql"), &["duplicate column"]),
+        ("008_email", include_str!("../migrations/008_email.sql"), &["duplicate column", "already exists"]),
+        ("009_optional_passkey", include_str!("../migrations/009_optional_passkey.sql"), &["already exists"]),
     ];
 
     for (name, sql, ignorable_errors) in migrations {
@@ -72,8 +78,22 @@ async fn main() {
     let jwt_secret: Vec<u8> = rand::thread_rng().gen::<[u8; 32]>().to_vec();
     tracing::info!("Generated random JWT secret for this session");
 
+    // Initialize email service (optional - app works without it)
+    let email_service = email::EmailService::new();
+    if email_service.is_some() {
+        tracing::info!("Email service initialized");
+    } else {
+        tracing::info!("Email service not configured (set RESEND_API_KEY to enable)");
+    }
+
     // App state
-    let state = AppState { db, webauthn, jwt_secret };
+    let state = AppState {
+        db,
+        webauthn,
+        jwt_secret,
+        email_service: email_service.clone(),
+        public_url: public_url.clone(),
+    };
 
     // CORS setup for local development
     let cors = CorsLayer::new()
@@ -101,6 +121,14 @@ async fn main() {
         .layer(DefaultBodyLimit::max(10 * 1024 * 1024)) // 10MB limit for certificate uploads
         .route("/api/users/me/verification-token", get(get_verification_token))
         .route("/api/users/me/contract-request", post(submit_contract_request))
+        .route("/api/users/me/email", axum::routing::put(update_email))
+        .route("/api/users/me/email-notifications", axum::routing::put(update_email_notifications))
+        .route("/api/users/me/accept-privacy", post(accept_privacy))
+        .route("/api/users/me/data", get(export_my_data))
+        .route("/api/users/me", axum::routing::delete(delete_my_account))
+        .route("/api/auth/register/email", post(register_with_email))
+        .route("/api/auth/magic-link/request", post(request_magic_link))
+        .route("/api/auth/magic-link/verify", get(verify_magic_link))
         .route("/api/admin/pending-certificates", get(get_pending_certificates))
         .route("/api/admin/certificate/:user_id", get(get_certificate))
         .route("/api/admin/approve-food-safety/:user_id", post(approve_certificate))
@@ -140,6 +168,16 @@ async fn main() {
         // Debug-only endpoint for generating JWTs for any user
         #[cfg(debug_assertions)]
         let app = app.route("/api/local/jwt/:user_id", get(generate_jwt));
+
+    // Start notification worker if email service is available (before state is moved)
+    if let Some(ref email_svc) = email_service {
+        notifications::start_notification_worker(
+            state.db.clone(),
+            email_svc.clone(),
+            public_url.clone(),
+        );
+        tracing::info!("Notification worker started");
+    }
 
         let app = app
             .layer(cors)

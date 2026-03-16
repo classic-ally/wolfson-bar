@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getUserStatus, UserStatus, acceptCodeOfConduct, uploadCertificate, getVerificationToken, updateDisplayName, submitContractRequest } from '../lib/auth'
+import { getUserStatus, UserStatus, acceptCodeOfConduct, uploadCertificate, getVerificationToken, updateDisplayName, submitContractRequest, acceptPrivacy } from '../lib/auth'
 import CodeOfConduct from './CodeOfConduct'
 import QRCode from 'qrcode'
 
@@ -27,6 +27,16 @@ export default function OnboardingPage() {
       console.error('Failed to fetch status:', err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handlePrivacyAccept = async () => {
+    try {
+      await acceptPrivacy()
+      loadStatus()
+    } catch (err) {
+      console.error('Failed to accept privacy notice:', err)
+      alert('Failed to accept privacy notice. Please try again.')
     }
   }
 
@@ -312,6 +322,51 @@ export default function OnboardingPage() {
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        {/* Privacy Notice */}
+        <div style={{
+          border: '1px solid #ddd',
+          borderRadius: '8px',
+          padding: '20px',
+          backgroundColor: status.privacy_consent_given ? '#f0f9ff' : 'white'
+        }}>
+          <h3 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {status.privacy_consent_given ? '✅' : '☐'} Privacy Notice
+          </h3>
+          <p style={{ color: '#666', fontSize: '14px' }}>
+            Read and acknowledge our privacy notice about how your data is used.
+          </p>
+          {!status.privacy_consent_given && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+              <a
+                href="/privacy"
+                target="_blank"
+                style={{
+                  color: '#007bff',
+                  fontSize: '14px'
+                }}
+              >
+                Read Privacy Notice
+              </a>
+              <button
+                onClick={handlePrivacyAccept}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#8B0000',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }}
+              >
+                I Acknowledge
+              </button>
+            </div>
+          )}
+          {status.privacy_consent_given && (
+            <span style={{ color: '#0066cc', fontSize: '14px' }}>Acknowledged ✓</span>
+          )}
+        </div>
+
         {/* Code of Conduct */}
         <div style={{
           border: '1px solid #ddd',

@@ -24,6 +24,8 @@ import MenuPage from './components/MenuPage'
 import EventsCalendar from './components/EventsCalendar'
 import ShiftDetailModal from './components/ShiftDetailModal'
 import ProtectedRoute from './components/ProtectedRoute'
+import MagicLinkCallback from './components/MagicLinkCallback'
+import PrivacyPage from './components/PrivacyPage'
 import { isLoggedIn, isCommittee, getEvents, Event, getShifts, ShiftInfo, getUserStatus, UserStatus, getTermWeeks, TermWeek } from './lib/auth'
 
 // Helper to get date range for events (3 months before to 3 months after current month)
@@ -282,6 +284,8 @@ function App() {
           <Route path="/events" element={<EventsPage />} />
           <Route path="/menu" element={<MenuPage />} />
           <Route path="/about" element={<AboutPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/auth/magic-link-callback" element={<MagicLinkCallback />} />
           <Route path="/profile" element={<UserProfileLayout />}>
             <Route index element={<UserOverview />} />
             <Route path="shifts" element={<UserShifts />} />

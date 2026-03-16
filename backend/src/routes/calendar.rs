@@ -8,6 +8,7 @@ use icalendar::{Calendar, Component, Event as IcalEvent, EventLike};
 use sqlx::FromRow;
 use tracing::error;
 
+use crate::ical::{ShiftIcalParams, create_shift_ical_event, shift_uid};
 use crate::routes::auth::AppState;
 
 #[derive(Debug, FromRow)]
@@ -239,7 +240,7 @@ pub async fn get_user_calendar(
     let mut calendar = Calendar::new();
     calendar.name("Wolfson Bar - My Shifts");
 
-    // Add each shift as an event
+    // Add each shift as an event using shared helper
     for (shift_date, event_title) in shifts {
         let date = NaiveDate::parse_from_str(&shift_date, "%Y-%m-%d")
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Invalid date: {}", e)))?;
@@ -249,45 +250,16 @@ pub async fn get_user_calendar(
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
-        // Parse times
-        let start_parts: Vec<&str> = bar_hours.open_time.split(':').collect();
-        let end_parts: Vec<&str> = bar_hours.close_time.split(':').collect();
-
-        let start_hour: u32 = start_parts[0].parse().unwrap_or(20);
-        let start_min: u32 = start_parts[1].parse().unwrap_or(0);
-        let end_hour: u32 = end_parts[0].parse().unwrap_or(23);
-        let end_min: u32 = end_parts[1].parse().unwrap_or(0);
-
-        let start_datetime = date.and_hms_opt(start_hour, start_min, 0).ok_or_else(|| {
-            (StatusCode::INTERNAL_SERVER_ERROR, "Invalid start datetime".to_string())
-        })?;
-
-        // Handle midnight crossover
-        let end_datetime = if end_hour < start_hour {
-            let next_day = date.succ_opt().ok_or_else(|| {
-                (StatusCode::INTERNAL_SERVER_ERROR, "Invalid end date".to_string())
-            })?;
-            next_day.and_hms_opt(end_hour, end_min, 0).ok_or_else(|| {
-                (StatusCode::INTERNAL_SERVER_ERROR, "Invalid end datetime".to_string())
-            })?
-        } else {
-            date.and_hms_opt(end_hour, end_min, 0).ok_or_else(|| {
-                (StatusCode::INTERNAL_SERVER_ERROR, "Invalid end datetime".to_string())
-            })?
+        let params = ShiftIcalParams {
+            shift_date: shift_date.clone(),
+            event_title: event_title.clone(),
+            open_time: bar_hours.open_time,
+            close_time: bar_hours.close_time,
+            uid: shift_uid(&user_id, &shift_date),
         };
 
-        let title = if let Some(event) = event_title {
-            format!("Bar Shift - {}", event)
-        } else {
-            "Bar Shift".to_string()
-        };
-
-        let mut ical_event = IcalEvent::new();
-        ical_event
-            .summary(&title)
-            .starts(start_datetime)
-            .ends(end_datetime)
-            .location("Wolfson College, Linton Road, Oxford OX2 6UD, UK");
+        let ical_event = create_shift_ical_event(&params)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create event: {}", e)))?;
 
         calendar.push(ical_event);
     }
