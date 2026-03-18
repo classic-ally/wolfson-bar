@@ -13,6 +13,70 @@ use webauthn_rs::prelude::*;
 use crate::auth::create_jwt_token;
 use crate::models::{AuthResponse, ErrorResponse, RegisterStartRequest, User};
 
+/// Shared helper for creating a user in the database.
+/// Handles first-user detection (auto-admin/committee).
+pub async fn create_user_in_db(
+    db: &SqlitePool,
+    display_name: Option<String>,
+    email: Option<String>,
+    passkey_credential: Option<String>,
+) -> Result<User, (StatusCode, Json<ErrorResponse>)> {
+    // Check if this is the first user
+    let user_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
+        .fetch_one(db)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("Database error: {}", e),
+                }),
+            )
+        })?;
+
+    let is_first_user = user_count.0 == 0;
+    if is_first_user {
+        info!("👑 First user - granting admin and committee permissions");
+    }
+
+    let mut user = User::new(
+        display_name,
+        passkey_credential,
+        is_first_user,
+        is_first_user,
+    );
+    user.email = email;
+
+    info!("💾 Storing user with ID: {}", user.id);
+
+    sqlx::query("INSERT INTO users (id, display_name, passkey_credential, is_committee, is_admin, code_of_conduct_signed, food_safety_completed, food_safety_certificate, induction_completed, has_contract, contract_expiry_date, created_at, email) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(&user.id)
+        .bind(&user.display_name)
+        .bind(&user.passkey_credential)
+        .bind(user.is_committee)
+        .bind(user.is_admin)
+        .bind(user.code_of_conduct_signed)
+        .bind(user.food_safety_completed)
+        .bind(&user.food_safety_certificate)
+        .bind(user.induction_completed)
+        .bind(user.has_contract)
+        .bind(&user.contract_expiry_date)
+        .bind(&user.created_at)
+        .bind(&user.email)
+        .execute(db)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("Failed to create user: {}", e),
+                }),
+            )
+        })?;
+
+    Ok(user)
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: SqlitePool,
@@ -139,62 +203,9 @@ pub async fn register_finish(
             )
         })?;
 
-    // Check if this is the first user
-    let user_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: format!("Database error: {}", e),
-                }),
-            )
-        })?;
-
-    let is_first_user = user_count.0 == 0;
-    let is_committee = is_first_user;
-    let is_admin = is_first_user;
-    if is_first_user {
-        info!("👑 First user - granting admin and committee permissions");
-    }
-
-    // Store user with passkey
-    let mut user = User::new(
-        display_name,
-        Some(serde_json::to_string(&passkey).unwrap()),
-        is_committee,
-        is_admin,
-    );
-    user.email = email;
-
-    info!("💾 Storing user with ID: {}", user.id);
-    debug!("🔑 Passkey credential: {:?}", user.passkey_credential);
-
-    sqlx::query("INSERT INTO users (id, display_name, passkey_credential, is_committee, is_admin, code_of_conduct_signed, food_safety_completed, food_safety_certificate, induction_completed, has_contract, contract_expiry_date, created_at, email) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-        .bind(&user.id)
-        .bind(&user.display_name)
-        .bind(&user.passkey_credential)
-        .bind(is_committee)
-        .bind(is_admin)
-        .bind(&user.code_of_conduct_signed)
-        .bind(&user.food_safety_completed)
-        .bind(&user.food_safety_certificate)
-        .bind(&user.induction_completed)
-        .bind(&user.has_contract)
-        .bind(&user.contract_expiry_date)
-        .bind(&user.created_at)
-        .bind(&user.email)
-        .execute(&state.db)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: format!("Failed to create user: {}", e),
-                }),
-            )
-        })?;
+    // Create user via shared helper
+    let passkey_json = Some(serde_json::to_string(&passkey).unwrap());
+    let user = create_user_in_db(&state.db, display_name, email, passkey_json).await?;
 
     // Generate JWT
     let token = create_jwt_token(&user.id, &state.jwt_secret).map_err(|e| {
@@ -460,39 +471,8 @@ pub async fn register_with_email(
         (StatusCode::SERVICE_UNAVAILABLE, Json(ErrorResponse { error: "Email service not configured".to_string() }))
     })?;
 
-    // Check if first user
-    let user_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: format!("Database error: {}", e) })))?;
-
-    let is_first_user = user_count.0 == 0;
-
-    // Create user without passkey
-    let user = User::new(
-        Some(display_name),
-        None, // no passkey
-        is_first_user,
-        is_first_user,
-    );
-
-    sqlx::query("INSERT INTO users (id, display_name, passkey_credential, is_committee, is_admin, code_of_conduct_signed, food_safety_completed, food_safety_certificate, induction_completed, has_contract, contract_expiry_date, created_at, email) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-        .bind(&user.id)
-        .bind(&user.display_name)
-        .bind(&user.passkey_credential)
-        .bind(user.is_committee)
-        .bind(user.is_admin)
-        .bind(user.code_of_conduct_signed)
-        .bind(user.food_safety_completed)
-        .bind(&user.food_safety_certificate)
-        .bind(user.induction_completed)
-        .bind(user.has_contract)
-        .bind(&user.contract_expiry_date)
-        .bind(&user.created_at)
-        .bind(&email)
-        .execute(&state.db)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: format!("Failed to create user: {}", e) })))?;
+    // Create user without passkey via shared helper
+    let user = create_user_in_db(&state.db, Some(display_name), Some(email.clone()), None).await?;
 
     info!("📧 Created email-only user: {} ({})", user.id, email);
 

@@ -5,13 +5,14 @@ use axum::{
     response::Response,
     body::Body,
 };
+use axum_extra::extract::Multipart;
 use serde::{Deserialize, Serialize};
 use tracing::{info, error};
 use ts_rs::TS;
 
 use crate::auth::{CommitteeUser, AdminUser};
 use crate::models::{ErrorResponse, User};
-use crate::routes::auth::AppState;
+use crate::routes::auth::{AppState, create_user_in_db};
 
 #[derive(Debug, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../frontend/src/types/")]
@@ -539,6 +540,7 @@ pub struct UserListItem {
     pub display_name: Option<String>,
     pub is_committee: bool,
     pub is_admin: bool,
+    pub code_of_conduct_signed: bool,
     pub induction_completed: bool,
     pub created_at: String,
 }
@@ -574,6 +576,7 @@ pub async fn get_all_users(
             display_name: u.display_name,
             is_committee: u.is_committee,
             is_admin: u.is_admin,
+            code_of_conduct_signed: u.code_of_conduct_signed,
             induction_completed: u.induction_completed,
             created_at: u.created_at,
         })
@@ -835,5 +838,267 @@ pub async fn admin_mark_induction(
     }
 
     info!("✅ Induction marked complete for user {}", target_user_id);
+    Ok(StatusCode::OK)
+}
+
+/// Mark a user's code of conduct as signed (admin only)
+pub async fn admin_mark_coc(
+    State(state): State<AppState>,
+    AdminUser(admin): AdminUser,
+    Path(target_user_id): Path<String>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    info!("✅ Admin {} marking CoC signed for user {}", admin.id, target_user_id);
+
+    let result = sqlx::query("UPDATE users SET code_of_conduct_signed = TRUE WHERE id = ?")
+        .bind(&target_user_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            error!("❌ Failed to mark CoC: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to mark code of conduct signed".to_string(),
+                }),
+            )
+        })?;
+
+    if result.rows_affected() == 0 {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "User not found".to_string(),
+            }),
+        ));
+    }
+
+    info!("✅ CoC marked signed for user {}", target_user_id);
+    Ok(StatusCode::OK)
+}
+
+// ===== Bulk Import =====
+
+#[derive(Debug, Deserialize)]
+pub struct BulkImportUser {
+    pub email: String,
+    pub display_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BulkImportRequest {
+    pub users: Vec<BulkImportUser>,
+}
+
+#[derive(Debug, Serialize, TS)]
+#[ts(export, export_to = "../frontend/src/types/")]
+pub struct BulkImportDetail {
+    pub email: String,
+    pub status: String, // "created", "skipped", "error"
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Serialize, TS)]
+#[ts(export, export_to = "../frontend/src/types/")]
+pub struct BulkImportResult {
+    pub created: i32,
+    pub skipped: i32,
+    pub errors: Vec<String>,
+    pub details: Vec<BulkImportDetail>,
+}
+
+/// Bulk import users by email (admin only)
+pub async fn bulk_import_users(
+    State(state): State<AppState>,
+    AdminUser(admin): AdminUser,
+    Json(req): Json<BulkImportRequest>,
+) -> Result<Json<BulkImportResult>, (StatusCode, Json<ErrorResponse>)> {
+    info!("📦 Admin {} bulk importing {} users", admin.id, req.users.len());
+
+    let mut created = 0i32;
+    let mut skipped = 0i32;
+    let mut errors = Vec::new();
+    let mut details = Vec::new();
+
+    for entry in &req.users {
+        let email = entry.email.trim().to_lowercase();
+
+        // Validate email
+        if !email.contains('@') || email.starts_with('@') || email.ends_with('@') {
+            errors.push(format!("Invalid email: {}", email));
+            details.push(BulkImportDetail {
+                email: email.clone(),
+                status: "error".to_string(),
+                message: Some("Invalid email format".to_string()),
+            });
+            continue;
+        }
+
+        // Check duplicate
+        let existing: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE email = ?)")
+            .bind(&email)
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or(false);
+
+        if existing {
+            skipped += 1;
+            details.push(BulkImportDetail {
+                email: email.clone(),
+                status: "skipped".to_string(),
+                message: Some("Email already exists".to_string()),
+            });
+            continue;
+        }
+
+        // Create user (no passkey, no email sent)
+        match create_user_in_db(
+            &state.db,
+            entry.display_name.clone(),
+            Some(email.clone()),
+            None,
+        ).await {
+            Ok(_) => {
+                created += 1;
+                details.push(BulkImportDetail {
+                    email: email.clone(),
+                    status: "created".to_string(),
+                    message: None,
+                });
+            }
+            Err((_status, err_json)) => {
+                let msg = err_json.0.error.clone();
+                errors.push(format!("{}: {}", email, msg));
+                details.push(BulkImportDetail {
+                    email: email.clone(),
+                    status: "error".to_string(),
+                    message: Some(msg),
+                });
+            }
+        }
+    }
+
+    info!("✅ Bulk import complete: {} created, {} skipped, {} errors", created, skipped, errors.len());
+
+    Ok(Json(BulkImportResult {
+        created,
+        skipped,
+        errors,
+        details,
+    }))
+}
+
+// ===== Admin Certificate Upload =====
+
+/// Upload a food safety certificate on behalf of a user (admin only)
+/// Automatically marks food_safety_completed = true (pre-approved)
+pub async fn admin_upload_certificate(
+    State(state): State<AppState>,
+    AdminUser(admin): AdminUser,
+    Path(target_user_id): Path<String>,
+    mut multipart: Multipart,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    info!("📤 Admin {} uploading certificate for user {}", admin.id, target_user_id);
+
+    // Verify target user exists
+    let _target = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+        .bind(&target_user_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|_| {
+            (StatusCode::NOT_FOUND, Json(ErrorResponse { error: "User not found".to_string() }))
+        })?;
+
+    // Extract file from multipart
+    let mut file_data: Option<Vec<u8>> = None;
+    let mut content_type: Option<String> = None;
+
+    while let Some(field) = multipart.next_field().await.map_err(|e| {
+        error!("❌ Multipart error: {}", e);
+        (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Invalid multipart data".to_string() }))
+    })? {
+        if field.name() == Some("certificate") {
+            content_type = field.content_type().map(|s| s.to_string());
+            let data = field.bytes().await.map_err(|e| {
+                error!("❌ Failed to read file: {}", e);
+                (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Failed to read file".to_string() }))
+            })?;
+            file_data = Some(data.to_vec());
+        }
+    }
+
+    let file_bytes = file_data.ok_or_else(|| {
+        (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "No file uploaded".to_string() }))
+    })?;
+
+    // Validate size (5MB)
+    const MAX_SIZE: usize = 5 * 1024 * 1024;
+    if file_bytes.len() > MAX_SIZE {
+        return Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "File must be under 5 MB".to_string() })));
+    }
+
+    // Validate content type
+    let stored_type = if let Some(ref ct) = content_type {
+        if !ct.starts_with("image/") && ct != "application/pdf" {
+            return Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Only image files and PDFs are allowed".to_string() })));
+        }
+        ct.clone()
+    } else {
+        "application/octet-stream".to_string()
+    };
+
+    // Store certificate and auto-approve
+    sqlx::query("UPDATE users SET food_safety_certificate = ?, food_safety_certificate_type = ?, food_safety_completed = TRUE WHERE id = ?")
+        .bind(&file_bytes)
+        .bind(&stored_type)
+        .bind(&target_user_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            error!("❌ Failed to store certificate: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Failed to store certificate".to_string() }))
+        })?;
+
+    info!("✅ Certificate uploaded and approved for user {}", target_user_id);
+    Ok(StatusCode::OK)
+}
+
+// ===== Admin Set Contract =====
+
+#[derive(Debug, Deserialize)]
+pub struct AdminSetContractRequest {
+    pub contract_expiry_date: String,
+}
+
+/// Set contract for a user (admin only)
+/// Automatically marks has_contract = true (pre-approved)
+pub async fn admin_set_contract(
+    State(state): State<AppState>,
+    AdminUser(admin): AdminUser,
+    Path(target_user_id): Path<String>,
+    Json(req): Json<AdminSetContractRequest>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    info!("📋 Admin {} setting contract for user {}", admin.id, target_user_id);
+
+    // Validate date format
+    if chrono::NaiveDate::parse_from_str(&req.contract_expiry_date, "%Y-%m-%d").is_err() {
+        return Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Invalid date format. Use YYYY-MM-DD".to_string() })));
+    }
+
+    // Verify target user exists
+    let result = sqlx::query("UPDATE users SET has_contract = TRUE, contract_expiry_date = ? WHERE id = ?")
+        .bind(&req.contract_expiry_date)
+        .bind(&target_user_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            error!("❌ Failed to set contract: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Failed to set contract".to_string() }))
+        })?;
+
+    if result.rows_affected() == 0 {
+        return Err((StatusCode::NOT_FOUND, Json(ErrorResponse { error: "User not found".to_string() })));
+    }
+
+    info!("✅ Contract set for user {}", target_user_id);
     Ok(StatusCode::OK)
 }

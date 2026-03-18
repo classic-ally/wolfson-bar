@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getUserStatus, UserStatus, acceptCodeOfConduct, uploadCertificate, getVerificationToken, updateDisplayName, submitContractRequest, acceptPrivacy } from '../lib/auth'
+import { getUserStatus, UserStatus, acceptCodeOfConduct, uploadCertificate, getVerificationToken, updateDisplayName, submitContractRequest, acceptPrivacy, startPasskeySetup } from '../lib/auth'
 import CodeOfConduct from './CodeOfConduct'
 import QRCode from 'qrcode'
 
@@ -14,6 +14,7 @@ export default function OnboardingPage() {
   const [newDisplayName, setNewDisplayName] = useState('')
   const [contractExpiryDate, setContractExpiryDate] = useState('')
   const [submittingContract, setSubmittingContract] = useState(false)
+  const [settingUpPasskey, setSettingUpPasskey] = useState(false)
 
   useEffect(() => {
     loadStatus()
@@ -136,6 +137,20 @@ export default function OnboardingPage() {
       alert(err instanceof Error ? err.message : 'Failed to submit contract request. Please try again.')
     } finally {
       setSubmittingContract(false)
+    }
+  }
+
+  const handlePasskeySetup = async () => {
+    setSettingUpPasskey(true)
+    try {
+      await startPasskeySetup()
+      alert('Passkey set up successfully! You can now use it to sign in.')
+      loadStatus()
+    } catch (err) {
+      console.error('Passkey setup failed:', err)
+      alert(err instanceof Error ? err.message : 'Failed to set up passkey. Please try again.')
+    } finally {
+      setSettingUpPasskey(false)
     }
   }
 
@@ -541,6 +556,52 @@ export default function OnboardingPage() {
             <span style={{ color: '#0066cc', fontSize: '14px' }}>Approved ✓</span>
           )}
         </div>
+
+        {/* Passkey Setup (Optional, shown after all required steps) */}
+        {isFullyOnboarded && !status.has_passkey && (
+          <div style={{
+            border: '1px solid #b8daff',
+            borderRadius: '8px',
+            padding: '20px',
+            backgroundColor: '#e7f3ff'
+          }}>
+            <h3 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+              ☐ Set Up a Passkey (Recommended)
+            </h3>
+            <p style={{ color: '#666', fontSize: '14px' }}>
+              Passkeys let you sign in with your fingerprint, face, or device PIN — faster and more secure than email links.
+            </p>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                onClick={handlePasskeySetup}
+                disabled={settingUpPasskey}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: settingUpPasskey ? '#ccc' : '#0d6efd',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: settingUpPasskey ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {settingUpPasskey ? 'Setting up...' : 'Set Up Passkey'}
+              </button>
+            </div>
+          </div>
+        )}
+        {status.has_passkey && (
+          <div style={{
+            border: '1px solid #ddd',
+            borderRadius: '8px',
+            padding: '20px',
+            backgroundColor: '#f0f9ff'
+          }}>
+            <h3 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+              ✅ Passkey
+            </h3>
+            <span style={{ color: '#0066cc', fontSize: '14px' }}>Configured ✓</span>
+          </div>
+        )}
       </div>
     </div>
   )

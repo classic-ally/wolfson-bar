@@ -11,6 +11,7 @@ export default function AdminLayout() {
 
   const tabs = [
     { path: '/admin', label: 'Users' },
+    { path: '/admin/import', label: 'Import Users' },
   ]
 
   return (

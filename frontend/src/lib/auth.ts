@@ -218,6 +218,7 @@ export interface UserStatus {
   email: string | null
   email_notifications_enabled: boolean
   privacy_consent_given: boolean
+  has_passkey: boolean
 }
 
 /**
@@ -933,6 +934,7 @@ export interface UserListItem {
   display_name: string | null
   is_committee: boolean
   is_admin: boolean
+  code_of_conduct_signed: boolean
   induction_completed: boolean
   created_at: string
 }
@@ -982,6 +984,20 @@ export async function demoteUser(userId: string): Promise<void> {
 }
 
 /**
+ * Mark a user's code of conduct as signed (admin only)
+ */
+export async function markCoC(userId: string): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/users/${userId}/mark-coc`, {
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to mark code of conduct signed')
+  }
+}
+
+/**
  * Mark a user's induction as complete (admin only)
  */
 export async function markInduction(userId: string): Promise<void> {
@@ -1006,5 +1022,107 @@ export async function deleteUser(userId: string): Promise<void> {
   if (!response.ok) {
     const error = await response.json()
     throw new AuthError(error.error || 'Failed to delete user')
+  }
+}
+
+// ===== Bulk Import (admin only) =====
+
+export interface BulkImportUser {
+  email: string
+  display_name?: string
+}
+
+export interface BulkImportDetail {
+  email: string
+  status: string
+  message: string | null
+}
+
+export interface BulkImportResult {
+  created: number
+  skipped: number
+  errors: string[]
+  details: BulkImportDetail[]
+}
+
+export async function bulkImportUsers(users: BulkImportUser[]): Promise<BulkImportResult> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/users/bulk-import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ users }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to bulk import users')
+  }
+
+  return response.json()
+}
+
+// ===== Admin Certificate & Contract =====
+
+export async function adminUploadCertificate(userId: string, file: File): Promise<void> {
+  const formData = new FormData()
+  formData.append('certificate', file)
+
+  const token = getAuthToken()
+  if (!token) throw new AuthError('Not authenticated')
+
+  const response = await fetch(`${API_BASE}/api/admin/users/${userId}/upload-certificate`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}` },
+    body: formData,
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to upload certificate')
+  }
+}
+
+export async function adminSetContract(userId: string, expiryDate: string): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/users/${userId}/set-contract`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contract_expiry_date: expiryDate }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to set contract')
+  }
+}
+
+// ===== Passkey Setup (for authenticated users) =====
+
+export async function startPasskeySetup(): Promise<void> {
+  // Step 1: Get challenge
+  const startResponse = await authenticatedFetch(`${API_BASE}/api/users/me/passkey/start`, {
+    method: 'POST',
+  })
+
+  if (!startResponse.ok) {
+    const error = await startResponse.json()
+    throw new AuthError(error.error || 'Failed to start passkey setup')
+  }
+
+  const optionsResponse = await startResponse.json()
+
+  // Step 2: Create credential with browser
+  const credential = await startRegistration({
+    optionsJSON: optionsResponse.publicKey || optionsResponse
+  })
+
+  // Step 3: Finish registration
+  const finishResponse = await authenticatedFetch(`${API_BASE}/api/users/me/passkey/finish`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(credential),
+  })
+
+  if (!finishResponse.ok) {
+    const error = await finishResponse.json()
+    throw new AuthError(error.error || 'Failed to finish passkey setup')
   }
 }

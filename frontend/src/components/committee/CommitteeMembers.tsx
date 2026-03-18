@@ -9,6 +9,7 @@ export default function CommitteeMembers() {
   const [activeMembers, setActiveMembers] = useState<ActiveMember[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedCert, setSelectedCert] = useState<PendingCertificate | null>(null)
+  const [contractFilter, setContractFilter] = useState(false)
   usePageTitle('Members')
 
   useEffect(() => {
@@ -227,6 +228,14 @@ export default function CommitteeMembers() {
         <p style={{ color: '#666', marginBottom: '10px' }}>
           Members who have completed all onboarding requirements (CoC, food safety, and induction).
         </p>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px', cursor: 'pointer', fontSize: '14px' }}>
+          <input
+            type="checkbox"
+            checked={contractFilter}
+            onChange={(e) => setContractFilter(e.target.checked)}
+          />
+          Only show members with valid contracts
+        </label>
         {loading ? (
           <p>Loading...</p>
         ) : activeMembers.length === 0 ? (
@@ -254,7 +263,7 @@ export default function CommitteeMembers() {
               </tr>
             </thead>
             <tbody>
-              {activeMembers.map((member) => (
+              {activeMembers.filter(m => !contractFilter || m.has_contract).map((member) => (
                 <tr key={member.user_id} style={{ borderBottom: '1px solid #dee2e6' }}>
                   <td style={{ padding: '12px' }}>{member.display_name || 'Unknown'}</td>
                   <td style={{ padding: '12px' }}>

@@ -12,9 +12,9 @@ use axum::{
     Router,
 };
 use routes::auth::{login_finish, login_start, register_finish, register_start, register_with_email, AppState};
-use routes::users::{get_me, accept_coc, upload_certificate, get_verification_token, update_display_name, submit_contract_request, get_my_overview, update_email, update_email_notifications, delete_my_account, export_my_data, accept_privacy};
+use routes::users::{get_me, accept_coc, upload_certificate, get_verification_token, update_display_name, submit_contract_request, get_my_overview, update_email, update_email_notifications, delete_my_account, export_my_data, accept_privacy, start_passkey_setup, finish_passkey_setup};
 use routes::magic_link::{request_magic_link, verify_magic_link};
-use routes::admin::{get_pending_certificates, get_certificate, approve_certificate, verify_induction, get_active_members, get_pending_contracts, approve_contract, get_bar_hours, update_bar_hours, get_overview_stats, get_all_users, promote_user, demote_user, delete_user, admin_mark_induction};
+use routes::admin::{get_pending_certificates, get_certificate, approve_certificate, verify_induction, get_active_members, get_pending_contracts, approve_contract, get_bar_hours, update_bar_hours, get_overview_stats, get_all_users, promote_user, demote_user, delete_user, admin_mark_induction, admin_mark_coc, bulk_import_users, admin_upload_certificate, admin_set_contract};
 use routes::events::{get_events, get_event, create_event, update_event, delete_event};
 use routes::shifts::{get_shifts, signup_for_shift, cancel_shift_signup, get_my_shifts, admin_assign_to_shift, admin_remove_from_shift};
 use routes::calendar::{get_calendar_feed, download_event, get_user_calendar};
@@ -164,6 +164,12 @@ async fn main() {
         .route("/api/admin/users/:user_id/demote", post(demote_user))
         .route("/api/admin/users/:user_id", axum::routing::delete(delete_user))
         .route("/api/admin/users/:user_id/mark-induction", post(admin_mark_induction))
+        .route("/api/admin/users/:user_id/mark-coc", post(admin_mark_coc))
+        .route("/api/admin/users/bulk-import", post(bulk_import_users))
+        .route("/api/admin/users/:user_id/upload-certificate", post(admin_upload_certificate))
+        .route("/api/admin/users/:user_id/set-contract", post(admin_set_contract))
+        .route("/api/users/me/passkey/start", post(start_passkey_setup))
+        .route("/api/users/me/passkey/finish", post(finish_passkey_setup))
         ;
         // Debug-only endpoint for generating JWTs for any user
         #[cfg(debug_assertions)]

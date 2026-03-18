@@ -6,6 +6,7 @@ import { LoginButton } from './components/LoginButton'
 import CommitteeLayout from './components/CommitteeLayout'
 import AdminLayout from './components/AdminLayout'
 import AdminUsers from './components/admin/AdminUsers'
+import AdminBulkImport from './components/admin/AdminBulkImport'
 import CommitteeOverview from './components/committee/CommitteeOverview'
 import CommitteeEvents from './components/committee/CommitteeEvents'
 import CommitteeHours from './components/committee/CommitteeHours'
@@ -23,6 +24,7 @@ import AboutPage from './components/AboutPage'
 import MenuPage from './components/MenuPage'
 import EventsCalendar from './components/EventsCalendar'
 import ShiftDetailModal from './components/ShiftDetailModal'
+import PasskeyNudgeBanner from './components/PasskeyNudgeBanner'
 import ProtectedRoute from './components/ProtectedRoute'
 import MagicLinkCallback from './components/MagicLinkCallback'
 import PrivacyPage from './components/PrivacyPage'
@@ -279,6 +281,7 @@ function App() {
       <div className="app">
         <Header />
         <OnboardingStatusBarWrapper />
+        <PasskeyNudgeBanner />
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/events" element={<EventsPage />} />
@@ -303,6 +306,7 @@ function App() {
           </Route>
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<AdminUsers />} />
+            <Route path="import" element={<AdminBulkImport />} />
           </Route>
         </Routes>
       </div>

@@ -28,6 +28,7 @@ pub struct UserStatus {
     pub email: Option<String>,
     pub email_notifications_enabled: bool,
     pub privacy_consent_given: bool,
+    pub has_passkey: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -67,6 +68,7 @@ pub async fn get_me(
         email: user.email,
         email_notifications_enabled: user.email_notifications_enabled,
         privacy_consent_given: user.privacy_consent_given,
+        has_passkey: user.passkey_credential.is_some(),
     }))
 }
 
@@ -613,4 +615,149 @@ pub async fn export_my_data(
     });
 
     Ok(Json(data))
+}
+
+// ===== Passkey Setup (for email-only users) =====
+
+use webauthn_rs::prelude::*;
+use uuid::Uuid;
+
+/// Start passkey registration for an authenticated user
+pub async fn start_passkey_setup(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+) -> Result<Json<CreationChallengeResponse>, (StatusCode, Json<ErrorResponse>)> {
+    if user.passkey_credential.is_some() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse { error: "Passkey already configured".to_string() }),
+        ));
+    }
+
+    let user_uuid = Uuid::parse_str(&user.id).unwrap_or_else(|_| Uuid::new_v4());
+    let user_name = user.display_name.as_deref().unwrap_or("user");
+
+    let (ccr, reg_state) = state
+        .webauthn
+        .start_passkey_registration(user_uuid, user_name, user_name, None)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: format!("Failed to start passkey registration: {}", e) }),
+            )
+        })?;
+
+    // Store registration state keyed to user
+    let state_id = Uuid::new_v4().to_string();
+    let state_data = serde_json::to_string(&reg_state).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: format!("Failed to serialize state: {}", e) }),
+        )
+    })?;
+
+    // Clean up any previous passkey_setup states for this user
+    sqlx::query("DELETE FROM auth_states WHERE state_type = ? AND display_name = ?")
+        .bind("passkey_setup")
+        .bind(&user.id)
+        .execute(&state.db)
+        .await
+        .ok();
+
+    sqlx::query("INSERT INTO auth_states (id, state_type, state_data, display_name) VALUES (?, ?, ?, ?)")
+        .bind(&state_id)
+        .bind("passkey_setup")
+        .bind(&state_data)
+        .bind(&user.id) // store user_id in display_name column for lookup
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: format!("Database error: {}", e) }),
+            )
+        })?;
+
+    info!("🔑 Passkey setup started for user {}", user.id);
+
+    Ok(Json(ccr))
+}
+
+/// Finish passkey registration for an authenticated user
+pub async fn finish_passkey_setup(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Json(credential): Json<RegisterPublicKeyCredential>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    if user.passkey_credential.is_some() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse { error: "Passkey already configured".to_string() }),
+        ));
+    }
+
+    // Get registration state for this user
+    let auth_state: (String,) = sqlx::query_as(
+        "SELECT state_data FROM auth_states WHERE state_type = ? AND display_name = ? ORDER BY created_at DESC LIMIT 1"
+    )
+    .bind("passkey_setup")
+    .bind(&user.id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse { error: format!("No passkey setup state found: {}", e) }),
+        )
+    })?;
+
+    let reg_state: PasskeyRegistration = serde_json::from_str(&auth_state.0).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: format!("Failed to deserialize state: {}", e) }),
+        )
+    })?;
+
+    // Verify the credential
+    let passkey = state
+        .webauthn
+        .finish_passkey_registration(&credential, &reg_state)
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse { error: format!("Passkey registration failed: {}", e) }),
+            )
+        })?;
+
+    // Store passkey on user
+    let passkey_json = serde_json::to_string(&passkey).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: format!("Failed to serialize passkey: {}", e) }),
+        )
+    })?;
+
+    sqlx::query("UPDATE users SET passkey_credential = ? WHERE id = ?")
+        .bind(&passkey_json)
+        .bind(&user.id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: format!("Failed to store passkey: {}", e) }),
+            )
+        })?;
+
+    // Clean up
+    sqlx::query("DELETE FROM auth_states WHERE state_type = ? AND display_name = ?")
+        .bind("passkey_setup")
+        .bind(&user.id)
+        .execute(&state.db)
+        .await
+        .ok();
+
+    info!("🎉 Passkey configured for user {}", user.id);
+
+    Ok(StatusCode::OK)
 }
