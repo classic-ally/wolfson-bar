@@ -8,3 +8,4 @@ pub mod local;
 pub mod stock;
 pub mod term_weeks;
 pub mod magic_link;
+pub mod induction;

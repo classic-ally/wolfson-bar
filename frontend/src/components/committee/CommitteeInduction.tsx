@@ -1,17 +1,68 @@
-import { useState } from 'react'
-import { verifyInduction } from '../../lib/auth'
+import { useState, useEffect } from 'react'
+import { getPendingInductionApprovals, markInduction, markSupervisedShift, verifyInduction, PendingInductionApproval } from '../../lib/auth'
 import { usePageTitle } from '../../hooks/usePageTitle'
 import QRScanner from '../QRScanner'
 
 export default function CommitteeInduction() {
   const [showScanner, setShowScanner] = useState(false)
+  const [approvals, setApprovals] = useState<PendingInductionApproval[]>([])
+  const [loadingApprovals, setLoadingApprovals] = useState(true)
+  const [actionInProgress, setActionInProgress] = useState<string | null>(null)
   usePageTitle('Verify Induction')
+
+  useEffect(() => {
+    loadApprovals()
+  }, [])
+
+  const loadApprovals = async () => {
+    try {
+      const data = await getPendingInductionApprovals()
+      setApprovals(data)
+    } catch (err) {
+      console.error('Failed to load pending induction approvals:', err)
+    } finally {
+      setLoadingApprovals(false)
+    }
+  }
+
+  const handleApproveInduction = async (approval: PendingInductionApproval) => {
+    if (!confirm(`Approve induction for ${approval.display_name || 'Unknown'}?`)) return
+    setActionInProgress(approval.user_id)
+    try {
+      await markInduction(approval.user_id)
+      await loadApprovals()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to approve induction')
+    } finally {
+      setActionInProgress(null)
+    }
+  }
+
+  const handleApproveWithSupervised = async (approval: PendingInductionApproval) => {
+    if (!confirm(`Approve induction AND supervised shift for ${approval.display_name || 'Unknown'}?`)) return
+    setActionInProgress(approval.user_id)
+    try {
+      await markInduction(approval.user_id)
+      await markSupervisedShift(approval.user_id)
+      await loadApprovals()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to approve induction and supervised shift')
+    } finally {
+      setActionInProgress(null)
+    }
+  }
+
+  const handleDismiss = async (approval: PendingInductionApproval) => {
+    if (!confirm(`Dismiss induction request from ${approval.display_name || 'Unknown'}? This will not mark them as inducted.`)) return
+    setApprovals(prev => prev.filter(a => a.user_id !== approval.user_id))
+  }
 
   const handleQRScan = async (token: string) => {
     try {
       await verifyInduction(token)
       alert('Induction verified successfully!')
       setShowScanner(false)
+      await loadApprovals()
     } catch (err) {
       console.error('Failed to verify induction:', err)
       alert(err instanceof Error ? err.message : 'Failed to verify induction. Please try again.')
@@ -23,9 +74,103 @@ export default function CommitteeInduction() {
     <div>
       <h1>Induction Verification</h1>
       <p style={{ color: '#666', marginBottom: '30px' }}>
-        Scan a member's QR code to verify their induction completion during their training shift.
+        Review pending induction approvals and verify member inductions.
       </p>
 
+      {/* Pending Induction Approvals */}
+      <div style={{
+        backgroundColor: 'white',
+        padding: '24px',
+        borderRadius: '8px',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+        marginBottom: '30px',
+      }}>
+        <h3 style={{ marginTop: 0 }}>Pending Induction Approvals</h3>
+
+        {loadingApprovals ? (
+          <p style={{ color: '#666' }}>Loading...</p>
+        ) : approvals.length === 0 ? (
+          <p style={{ color: '#666' }}>No pending induction approvals.</p>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ backgroundColor: '#f8f9fa', borderBottom: '2px solid #dee2e6' }}>
+                <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '13px' }}>Date</th>
+                <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '13px' }}>Inductee</th>
+                <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: '13px' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {approvals.map((approval) => {
+                const disabled = actionInProgress === approval.user_id
+                return (
+                  <tr key={approval.user_id} style={{ borderBottom: '1px solid #dee2e6' }}>
+                    <td style={{ padding: '10px 12px', fontSize: '14px' }}>
+                      {new Date(approval.shift_date + 'T00:00:00').toLocaleDateString()}
+                    </td>
+                    <td style={{ padding: '10px 12px', fontSize: '14px' }}>
+                      {approval.display_name || 'Unknown'}
+                    </td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                        <button
+                          onClick={() => handleApproveInduction(approval)}
+                          disabled={disabled}
+                          style={{
+                            padding: '6px 12px',
+                            backgroundColor: disabled ? '#ccc' : '#28a745',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: disabled ? 'not-allowed' : 'pointer',
+                            fontSize: '13px',
+                          }}
+                        >
+                          Approve Induction
+                        </button>
+                        {approval.full_shift && (
+                          <button
+                            onClick={() => handleApproveWithSupervised(approval)}
+                            disabled={disabled}
+                            style={{
+                              padding: '6px 12px',
+                              backgroundColor: disabled ? '#ccc' : '#0d6efd',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '4px',
+                              cursor: disabled ? 'not-allowed' : 'pointer',
+                              fontSize: '13px',
+                            }}
+                          >
+                            Also Approve Supervised Shift
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleDismiss(approval)}
+                          disabled={disabled}
+                          style={{
+                            padding: '6px 12px',
+                            backgroundColor: disabled ? '#ccc' : '#6c757d',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: disabled ? 'not-allowed' : 'pointer',
+                            fontSize: '13px',
+                          }}
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* QR Scanner Fallback */}
       <div style={{
         backgroundColor: 'white',
         padding: '24px',
@@ -33,14 +178,10 @@ export default function CommitteeInduction() {
         boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
         maxWidth: '600px'
       }}>
-        <h3 style={{ marginTop: 0 }}>How to Verify Induction</h3>
-        <ol style={{ paddingLeft: '20px', lineHeight: '1.8' }}>
-          <li>Member completes their training shift with you</li>
-          <li>Member opens their profile page and generates QR code</li>
-          <li>Click "Scan QR Code" below to open the scanner</li>
-          <li>Scan the QR code displayed on the member's device</li>
-          <li>System will mark their induction as complete</li>
-        </ol>
+        <h3 style={{ marginTop: 0 }}>QR Scanner</h3>
+        <p style={{ color: '#666', fontSize: '14px', marginBottom: '16px' }}>
+          Use this as a manual verification fallback. Scan a member's QR code to verify their induction.
+        </p>
 
         <button
           onClick={() => setShowScanner(true)}
@@ -53,10 +194,9 @@ export default function CommitteeInduction() {
             cursor: 'pointer',
             fontSize: '16px',
             fontWeight: 500,
-            marginTop: '20px'
           }}
         >
-          📷 Scan QR Code
+          Scan QR Code
         </button>
       </div>
 

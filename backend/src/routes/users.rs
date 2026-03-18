@@ -29,6 +29,7 @@ pub struct UserStatus {
     pub email_notifications_enabled: bool,
     pub privacy_consent_given: bool,
     pub has_passkey: bool,
+    pub supervised_shift_completed: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -69,6 +70,7 @@ pub async fn get_me(
         email_notifications_enabled: user.email_notifications_enabled,
         privacy_consent_given: user.privacy_consent_given,
         has_passkey: user.passkey_credential.is_some(),
+        supervised_shift_completed: user.supervised_shift_completed,
     }))
 }
 
@@ -379,13 +381,15 @@ pub async fn get_my_overview(
 ) -> Result<Json<UserOverview>, (StatusCode, Json<ErrorResponse>)> {
     info!("📊 Fetching overview for user: {}", user.id);
 
-    // Determine next onboarding step
-    let next_onboarding_step = if !user.code_of_conduct_signed {
+    // Determine next onboarding step (induction first, then CoC, food safety, supervised shift)
+    let next_onboarding_step = if !user.induction_completed {
+        Some("induction".to_string())
+    } else if !user.code_of_conduct_signed {
         Some("code_of_conduct".to_string())
     } else if !user.food_safety_completed {
         Some("food_safety".to_string())
-    } else if !user.induction_completed {
-        Some("induction".to_string())
+    } else if !user.supervised_shift_completed {
+        Some("supervised_shift".to_string())
     } else {
         None
     };
@@ -604,6 +608,7 @@ pub async fn export_my_data(
             "has_contract": user.has_contract,
             "contract_expiry_date": user.contract_expiry_date,
             "privacy_consent_given": user.privacy_consent_given,
+            "supervised_shift_completed": user.supervised_shift_completed,
             "created_at": user.created_at,
         },
         "shift_signups": signups.iter().map(|(date, title)| {

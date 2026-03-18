@@ -35,6 +35,8 @@ export default function UserOverview() {
         return { main: 'Incomplete', subtitle: 'Upload Food Safety Certificate' }
       case 'induction':
         return { main: 'Incomplete', subtitle: 'Complete Induction Shift' }
+      case 'supervised_shift':
+        return { main: 'Incomplete', subtitle: 'Complete Supervised Shift' }
       default:
         return { main: 'Unknown', subtitle: 'Unknown step' }
     }

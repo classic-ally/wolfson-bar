@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { getAllUsers, promoteUser, demoteUser, deleteUser, markCoC, markInduction, adminUploadCertificate, adminSetContract, UserListItem, getUserId } from '../../lib/auth'
+import { getAllUsers, promoteUser, demoteUser, deleteUser, markCoC, markInduction, markSupervisedShift, adminUploadCertificate, adminSetContract, adminClearContract, UserListItem, getUserId } from '../../lib/auth'
 import { usePageTitle } from '../../hooks/usePageTitle'
 
 function ActionsDropdown({ user, currentUserId, isLastAdmin, actionInProgress, onAction }: {
@@ -29,6 +29,7 @@ function ActionsDropdown({ user, currentUserId, isLastAdmin, actionInProgress, o
     { label: 'Demote', action: 'demote', show: user.is_admin || user.is_committee, disabledReason: isLastAdmin ? 'Last admin' : undefined },
     { label: 'Mark CoC Signed', action: 'mark-coc', show: !user.code_of_conduct_signed },
     { label: 'Mark Inducted', action: 'mark-induction', show: !user.induction_completed },
+    { label: 'Mark Supervised Shift', action: 'mark-supervised', show: !user.supervised_shift_completed },
     { label: 'Upload Certificate', action: 'upload-cert', show: true },
     { label: 'Manage Contract', action: 'manage-contract', show: true },
     { label: 'Delete', action: 'delete', show: user.id !== currentUserId, color: '#dc3545', disabledReason: isLastAdmin ? 'Last admin' : undefined },
@@ -127,14 +128,13 @@ function ContractModal({ userId, userName, onClose, onSave }: {
   }
 
   const handleClear = async () => {
-    if (!confirm('Clear this user\'s contract? This sets has_contract to false.')) return
+    if (!confirm('Remove this user\'s contract? They will no longer be able to sign up for contract-required shifts.')) return
     setSaving(true)
     try {
-      // Set a far-past date and the backend sets has_contract = true, but we want to clear.
-      // We need a clear endpoint — for now, set expiry to empty via the same endpoint won't work.
-      // Actually the admin_set_contract always sets has_contract = TRUE. Let's just use it to update the date.
-      // For a true "clear", we'd need a separate endpoint. For now, let's inform the user.
-      alert('To fully remove a contract, delete and re-create the user, or ask the user to contact support. You can update the expiry date below.')
+      await adminClearContract(userId)
+      onSave()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to clear contract')
     } finally {
       setSaving(false)
     }
@@ -183,7 +183,23 @@ function ContractModal({ userId, userName, onClose, onSave }: {
           }}
         />
 
-        <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', gap: '10px', justifyContent: 'space-between' }}>
+          <button
+            onClick={handleClear}
+            disabled={saving}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#dc3545',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: saving ? 'not-allowed' : 'pointer',
+              opacity: saving ? 0.7 : 1,
+            }}
+          >
+            Remove Contract
+          </button>
+          <div style={{ display: 'flex', gap: '10px' }}>
           <button
             onClick={onClose}
             style={{
@@ -211,6 +227,7 @@ function ContractModal({ userId, userName, onClose, onSave }: {
           >
             {saving ? 'Saving...' : 'Set Contract'}
           </button>
+          </div>
         </div>
       </div>
     </div>
@@ -297,6 +314,19 @@ export default function AdminUsers() {
           await loadUsers()
         } catch (err) {
           alert(err instanceof Error ? err.message : 'Failed to mark induction complete')
+        } finally {
+          setActionInProgress(null)
+        }
+        break
+      }
+      case 'mark-supervised': {
+        if (!confirm('Mark supervised shift as complete for this user?')) return
+        setActionInProgress(userId)
+        try {
+          await markSupervisedShift(userId)
+          await loadUsers()
+        } catch (err) {
+          alert(err instanceof Error ? err.message : 'Failed to mark supervised shift complete')
         } finally {
           setActionInProgress(null)
         }

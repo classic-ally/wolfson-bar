@@ -3,7 +3,7 @@ import { Calendar, dateFnsLocalizer, ToolbarProps } from 'react-big-calendar'
 import { format, parse, startOfWeek, getDay } from 'date-fns'
 import { enGB } from 'date-fns/locale'
 import 'react-big-calendar/lib/css/react-big-calendar.css'
-import { Event, ShiftInfo, UserStatus, TermWeek } from '../lib/auth'
+import { Event, ShiftInfo, UserStatus, TermWeek, InductionDate } from '../lib/auth'
 
 interface CalendarEvent {
   id: string
@@ -91,6 +91,7 @@ interface EventsCalendarProps {
   shifts?: ShiftInfo[] // Optional shift info for authenticated users
   userStatus?: UserStatus | null // User status for induction checking
   termWeeks?: TermWeek[]
+  inductionDates?: InductionDate[] // Optional induction dates for pre-induction users
   onDateClick?: (date: Date) => void
   onSelectEvent?: (event: CalendarEvent) => void
   defaultDate?: Date
@@ -116,6 +117,7 @@ export default function EventsCalendar({
   shifts,
   userStatus,
   termWeeks,
+  inductionDates,
   onDateClick,
   onSelectEvent,
   defaultDate = new Date(),
@@ -149,6 +151,14 @@ export default function EventsCalendar({
     }
   }
 
+  // Build date -> induction availability lookup
+  const inductionByDate = new Map<string, InductionDate>()
+  if (inductionDates) {
+    for (const id of inductionDates) {
+      inductionByDate.set(id.date, id)
+    }
+  }
+
   // Create a map of date -> shift info for quick lookup
   const shiftsByDate = new Map<string, ShiftInfo>()
   if (shifts) {
@@ -172,6 +182,30 @@ export default function EventsCalendar({
       return {}
     }
 
+    const dateStr = format(date, 'yyyy-MM-dd')
+
+    // For pre-induction users, show induction availability as light blue
+    if (inductionDates && inductionDates.length > 0 && userStatus && !userStatus.induction_completed) {
+      const inductionDate = inductionByDate.get(dateStr)
+      if (inductionDate) {
+        const style: { backgroundColor?: string; border?: string; fontWeight?: string } = {
+          backgroundColor: '#e7f3ff',
+        }
+        if (isToday) {
+          style.border = '3px solid #002147'
+          style.fontWeight = 'bold'
+        }
+        return style
+      }
+      if (isToday) {
+        return {
+          border: '3px solid #002147',
+          fontWeight: 'bold',
+        }
+      }
+      return {}
+    }
+
     if (!shifts) {
       // If today but no shift data, just add border
       if (isToday) {
@@ -183,7 +217,6 @@ export default function EventsCalendar({
       return {}
     }
 
-    const dateStr = format(date, 'yyyy-MM-dd')
     const shift = shiftsByDate.get(dateStr)
 
     if (!shift) {
@@ -300,16 +333,50 @@ export default function EventsCalendar({
               dateHeader: ({ date, label }: { date: Date; label: string }) => {
                 const dateStr = format(date, 'yyyy-MM-dd')
                 const termLabel = termWeekByDate.get(dateStr)
+                const inductionDate = inductionByDate.get(dateStr)
+                const shift = shiftsByDate.get(dateStr)
+                const today = new Date()
+                today.setHours(0, 0, 0, 0)
+                const cellDate = new Date(date)
+                cellDate.setHours(0, 0, 0, 0)
+                // Show "I" badge for: pre-induction users (via inductionDates prop), or any committee member when induction is available on that date
+                const isOwnInduction = shift?.current_user_induction_available
+                const showInduction = cellDate >= today && (
+                  (inductionDate && inductionDate.slots_remaining > 0) ||
+                  (shift && shift.has_induction_availability)
+                )
                 return (
                   <div
                     style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 4px', cursor: onDateClick ? 'pointer' : undefined }}
                     onClick={onDateClick ? () => onDateClick(date) : undefined}
                   >
-                    {termLabel && (
-                      <span style={{ fontSize: '9px', color: '#002147', opacity: 0.6, fontWeight: 500 }}>
-                        {termLabel}
-                      </span>
-                    )}
+                    <div style={{ display: 'flex', gap: '3px' }}>
+                      {termLabel && (
+                        <span style={{ fontSize: '9px', color: '#002147', opacity: 0.6, fontWeight: 500 }}>
+                          {termLabel}
+                        </span>
+                      )}
+                      {showInduction && (
+                        <span style={{
+                          fontSize: '9px',
+                          color: isOwnInduction ? 'white' : '#0d6efd',
+                          backgroundColor: isOwnInduction ? '#0d6efd' : 'transparent',
+                          border: isOwnInduction ? 'none' : '1px solid #0d6efd',
+                          borderRadius: '2px',
+                          padding: '0 3px',
+                          fontWeight: 600,
+                          lineHeight: '14px',
+                        }}
+                          title={
+                            isOwnInduction
+                              ? `You're running an induction${shift && shift.induction_signups_count > 0 ? ` (${shift.induction_signups_count} signed up)` : ''}`
+                              : inductionDate ? `Induction available (${inductionDate.slots_remaining}/4 slots)` : 'Induction scheduled'
+                          }
+                        >
+                          I
+                        </span>
+                      )}
+                    </div>
                     <span style={{ marginLeft: 'auto' }}>{label}</span>
                   </div>
                 )

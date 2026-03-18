@@ -27,12 +27,17 @@ export default function OnboardingStatusBar({ onNavigateToOnboarding }: Onboardi
   const isFullyOnboarded =
     status.code_of_conduct_signed &&
     status.food_safety_completed &&
-    status.induction_completed
+    status.induction_completed &&
+    status.supervised_shift_completed
 
   // Don't show anything if fully onboarded
   if (isFullyOnboarded) return null
 
   const pendingTasks = []
+
+  if (!status.induction_completed) {
+    pendingTasks.push('Complete Induction')
+  }
 
   if (!status.code_of_conduct_signed) {
     pendingTasks.push('Complete Code of Conduct')
@@ -46,8 +51,8 @@ export default function OnboardingStatusBar({ onNavigateToOnboarding }: Onboardi
     }
   }
 
-  if (!status.induction_completed) {
-    pendingTasks.push('Complete Induction Shift')
+  if (!status.supervised_shift_completed && status.induction_completed && status.code_of_conduct_signed && status.food_safety_completed) {
+    pendingTasks.push('Complete Supervised Shift')
   }
 
   return (

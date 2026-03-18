@@ -53,6 +53,8 @@ pub struct User {
     pub email_notifications_enabled: bool,
     #[sqlx(default)]
     pub privacy_consent_given: bool,
+    #[sqlx(default)]
+    pub supervised_shift_completed: bool,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -95,6 +97,7 @@ impl User {
             email: None,
             email_notifications_enabled: false,
             privacy_consent_given: false,
+            supervised_shift_completed: false,
         }
     }
 }

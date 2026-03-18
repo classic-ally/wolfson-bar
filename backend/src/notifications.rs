@@ -66,7 +66,11 @@ pub fn start_notification_worker(db: SqlitePool, email_service: EmailService, pu
 
             info!("Running daily shift notification job");
             if let Err(e) = send_shift_notifications(&db, &email_service, &public_url).await {
-                error!("Notification job failed: {}", e);
+                error!("Shift notification job failed: {}", e);
+            }
+
+            if let Err(e) = send_induction_notifications(&db, &email_service).await {
+                error!("Induction notification job failed: {}", e);
             }
 
             // Sleep at least 1 hour to avoid running twice in the same hour
@@ -290,4 +294,230 @@ fn format_shift_date(date_str: &str) -> String {
     chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
         .map(|d| d.format("%A, %e %B %Y").to_string())
         .unwrap_or_else(|_| date_str.to_string())
+}
+
+// ===== Induction Notifications =====
+
+async fn send_induction_notifications(
+    db: &SqlitePool,
+    email_service: &EmailService,
+) -> Result<(), String> {
+    // Get all committee members with induction availability on future dates
+    #[derive(sqlx::FromRow)]
+    struct InductionAvail {
+        shift_date: String,
+        committee_user_id: String,
+    }
+
+    let availability: Vec<InductionAvail> = sqlx::query_as(
+        "SELECT ia.shift_date, ia.committee_user_id
+         FROM induction_availability ia
+         WHERE ia.shift_date >= date('now')
+         ORDER BY ia.shift_date"
+    )
+    .fetch_all(db)
+    .await
+    .map_err(|e| format!("Failed to fetch induction availability: {}", e))?;
+
+    if availability.is_empty() {
+        return Ok(());
+    }
+
+    // Get inductee counts per date
+    #[derive(sqlx::FromRow)]
+    struct InducteeCount {
+        shift_date: String,
+        count: i64,
+    }
+
+    let inductee_counts: Vec<InducteeCount> = sqlx::query_as(
+        "SELECT shift_date, COUNT(*) as count FROM induction_signups
+         WHERE shift_date >= date('now') GROUP BY shift_date"
+    )
+    .fetch_all(db)
+    .await
+    .unwrap_or_default();
+
+    let count_map: std::collections::HashMap<String, i64> = inductee_counts
+        .into_iter()
+        .map(|c| (c.shift_date, c.count))
+        .collect();
+
+    // Get existing notification log entries
+    #[derive(sqlx::FromRow)]
+    struct InductionLogEntry {
+        recipient_id: String,
+        shift_date: String,
+        notification_type: String,
+    }
+
+    let log_entries: Vec<InductionLogEntry> = sqlx::query_as(
+        "SELECT recipient_id, shift_date, notification_type FROM induction_notification_log
+         WHERE shift_date >= date('now')"
+    )
+    .fetch_all(db)
+    .await
+    .unwrap_or_default();
+
+    let log_set: std::collections::HashSet<(String, String, String)> = log_entries
+        .into_iter()
+        .map(|e| (e.recipient_id, e.shift_date, e.notification_type))
+        .collect();
+
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+
+    for avail in &availability {
+        let inductee_count = count_map.get(&avail.shift_date).copied().unwrap_or(0);
+
+        // Get committee member's email
+        let committee_email: Option<(String,)> = sqlx::query_as(
+            "SELECT email FROM users WHERE id = ? AND email IS NOT NULL AND email_notifications_enabled = TRUE"
+        )
+        .bind(&avail.committee_user_id)
+        .fetch_optional(db)
+        .await
+        .unwrap_or(None);
+
+        let Some((email,)) = committee_email else { continue };
+
+        // Notify committee member when inductees sign up (transition from 0 -> N)
+        if inductee_count > 0 {
+            let already_notified = log_set.contains(&(
+                avail.committee_user_id.clone(),
+                avail.shift_date.clone(),
+                "induction_signup".to_string(),
+            ));
+
+            if !already_notified {
+                let formatted_date = format_shift_date(&avail.shift_date);
+                let subject = format!("Induction scheduled for {}", formatted_date);
+                let html = format!(
+                    r#"<h2>Induction Session Scheduled</h2>
+                    <p>{} inductee(s) have signed up for your induction session on <strong>{}</strong>.</p>
+                    <p><strong>Time:</strong> 7:45 – 8:30</p>"#,
+                    inductee_count, formatted_date
+                );
+
+                if let Err(e) = email_service.send_email(&email, &subject, &html, None).await {
+                    error!("Failed to send induction signup notification: {}", e);
+                    continue;
+                }
+
+                upsert_induction_log(db, &avail.committee_user_id, &avail.shift_date, "induction_signup").await?;
+            }
+        }
+
+        // Notify if all inductees cancelled (transition from N -> 0)
+        if inductee_count == 0 {
+            let was_notified_signup = log_set.contains(&(
+                avail.committee_user_id.clone(),
+                avail.shift_date.clone(),
+                "induction_signup".to_string(),
+            ));
+            let already_cancelled = log_set.contains(&(
+                avail.committee_user_id.clone(),
+                avail.shift_date.clone(),
+                "induction_cancelled".to_string(),
+            ));
+
+            if was_notified_signup && !already_cancelled {
+                let formatted_date = format_shift_date(&avail.shift_date);
+                let subject = format!("Induction cancelled for {}", formatted_date);
+                let html = format!(
+                    r#"<h2>Induction Session Cancelled</h2>
+                    <p>All inductees have cancelled for your induction session on <strong>{}</strong>. No need to arrive early.</p>"#,
+                    formatted_date
+                );
+
+                if let Err(e) = email_service.send_email(&email, &subject, &html, None).await {
+                    error!("Failed to send induction cancellation notification: {}", e);
+                    continue;
+                }
+
+                upsert_induction_log(db, &avail.committee_user_id, &avail.shift_date, "induction_cancelled").await?;
+            }
+        }
+
+        // Day-of reminders
+        if avail.shift_date == today && inductee_count > 0 {
+            // Committee member day-of reminder
+            let already_reminded = log_set.contains(&(
+                avail.committee_user_id.clone(),
+                avail.shift_date.clone(),
+                "induction_day_committee".to_string(),
+            ));
+
+            if !already_reminded {
+                let subject = "Induction today at 7:45".to_string();
+                let html = format!(
+                    r#"<h2>Induction Today</h2>
+                    <p>You have an induction session today at <strong>7:45</strong> with {} inductee(s).</p>
+                    <p>Please arrive by 7:40 to set up.</p>"#,
+                    inductee_count
+                );
+
+                if let Err(e) = email_service.send_email(&email, &subject, &html, None).await {
+                    error!("Failed to send committee day-of induction reminder: {}", e);
+                } else {
+                    upsert_induction_log(db, &avail.committee_user_id, &avail.shift_date, "induction_day_committee").await?;
+                }
+            }
+
+            // Inductee day-of reminders
+            let inductees: Vec<NotifiableUser> = sqlx::query_as(
+                "SELECT u.id, u.email FROM induction_signups is2
+                 JOIN users u ON is2.user_id = u.id
+                 WHERE is2.shift_date = ? AND u.email IS NOT NULL AND u.email_notifications_enabled = TRUE"
+            )
+            .bind(&avail.shift_date)
+            .fetch_all(db)
+            .await
+            .unwrap_or_default();
+
+            for inductee in &inductees {
+                let already_reminded = log_set.contains(&(
+                    inductee.id.clone(),
+                    avail.shift_date.clone(),
+                    "induction_day_inductee".to_string(),
+                ));
+
+                if !already_reminded {
+                    let subject = "Your induction is today at 7:45".to_string();
+                    let html = r#"<h2>Induction Today</h2>
+                        <p>Your bar induction session is today at <strong>7:45</strong> at Wolfson College.</p>
+                        <p>Please arrive on time. The session runs from 7:45 to 8:30.</p>"#.to_string();
+
+                    if let Err(e) = email_service.send_email(&inductee.email, &subject, &html, None).await {
+                        error!("Failed to send inductee day-of reminder: {}", e);
+                    } else {
+                        upsert_induction_log(db, &inductee.id, &avail.shift_date, "induction_day_inductee").await?;
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn upsert_induction_log(
+    db: &SqlitePool,
+    recipient_id: &str,
+    shift_date: &str,
+    notification_type: &str,
+) -> Result<(), String> {
+    sqlx::query(
+        "INSERT INTO induction_notification_log (recipient_id, shift_date, notification_type, sent_at)
+         VALUES (?, ?, ?, datetime('now'))
+         ON CONFLICT(recipient_id, shift_date, notification_type) DO UPDATE SET
+             sent_at = excluded.sent_at"
+    )
+    .bind(recipient_id)
+    .bind(shift_date)
+    .bind(notification_type)
+    .execute(db)
+    .await
+    .map_err(|e| format!("Failed to update induction notification log: {}", e))?;
+
+    Ok(())
 }

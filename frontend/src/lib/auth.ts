@@ -219,6 +219,7 @@ export interface UserStatus {
   email_notifications_enabled: boolean
   privacy_consent_given: boolean
   has_passkey: boolean
+  supervised_shift_completed: boolean
 }
 
 /**
@@ -524,6 +525,9 @@ export interface ShiftInfo {
   signups: ShiftSignupUser[]
   open_time: string | null
   close_time: string | null
+  has_induction_availability: boolean
+  induction_signups_count: number
+  current_user_induction_available: boolean
 }
 
 export interface UserShift {
@@ -936,6 +940,7 @@ export interface UserListItem {
   is_admin: boolean
   code_of_conduct_signed: boolean
   induction_completed: boolean
+  supervised_shift_completed: boolean
   created_at: string
 }
 
@@ -1081,6 +1086,17 @@ export async function adminUploadCertificate(userId: string, file: File): Promis
   }
 }
 
+export async function adminClearContract(userId: string): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/users/${userId}/clear-contract`, {
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to clear contract')
+  }
+}
+
 export async function adminSetContract(userId: string, expiryDate: string): Promise<void> {
   const response = await authenticatedFetch(`${API_BASE}/api/admin/users/${userId}/set-contract`, {
     method: 'POST',
@@ -1092,6 +1108,100 @@ export async function adminSetContract(userId: string, expiryDate: string): Prom
     const error = await response.json()
     throw new AuthError(error.error || 'Failed to set contract')
   }
+}
+
+// ===== Induction System =====
+
+export interface InductionDateInductee {
+  user_id: string
+  display_name: string | null
+  full_shift: boolean
+}
+
+export interface InductionDate {
+  date: string
+  has_full_shift_committee: boolean
+  slots_remaining: number
+  user_signed_up: boolean
+  user_signed_up_full_shift: boolean
+  inductees: InductionDateInductee[]
+}
+
+export interface PendingInductionApproval {
+  shift_date: string
+  user_id: string
+  display_name: string | null
+  full_shift: boolean
+}
+
+export async function setInductionAvailability(date: string): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/shifts/${date}/induction-availability`, {
+    method: 'POST',
+  })
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to set induction availability')
+  }
+}
+
+export async function removeInductionAvailability(date: string): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/shifts/${date}/induction-availability`, {
+    method: 'DELETE',
+  })
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to remove induction availability')
+  }
+}
+
+export async function getInductionDates(): Promise<InductionDate[]> {
+  const response = await authenticatedFetch(`${API_BASE}/api/induction-dates`)
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to fetch induction dates')
+  }
+  return response.json()
+}
+
+export async function signupForInduction(date: string, fullShift: boolean): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/shifts/${date}/induction-signup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ full_shift: fullShift }),
+  })
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to sign up for induction')
+  }
+}
+
+export async function cancelInductionSignup(date: string): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/shifts/${date}/induction-signup`, {
+    method: 'DELETE',
+  })
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to cancel induction signup')
+  }
+}
+
+export async function markSupervisedShift(userId: string): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/users/${userId}/mark-supervised`, {
+    method: 'POST',
+  })
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to mark supervised shift complete')
+  }
+}
+
+export async function getPendingInductionApprovals(): Promise<PendingInductionApproval[]> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/pending-inductions`)
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to fetch pending induction approvals')
+  }
+  return response.json()
 }
 
 // ===== Passkey Setup (for authenticated users) =====

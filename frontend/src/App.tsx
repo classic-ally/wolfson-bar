@@ -28,7 +28,7 @@ import PasskeyNudgeBanner from './components/PasskeyNudgeBanner'
 import ProtectedRoute from './components/ProtectedRoute'
 import MagicLinkCallback from './components/MagicLinkCallback'
 import PrivacyPage from './components/PrivacyPage'
-import { isLoggedIn, isCommittee, getEvents, Event, getShifts, ShiftInfo, getUserStatus, UserStatus, getTermWeeks, TermWeek } from './lib/auth'
+import { isLoggedIn, isCommittee, getEvents, Event, getShifts, ShiftInfo, getUserStatus, UserStatus, getTermWeeks, TermWeek, getInductionDates, InductionDate } from './lib/auth'
 
 // Helper to get date range for events (3 months before to 3 months after current month)
 function getEventsDateRange() {
@@ -133,6 +133,7 @@ function EventsPage() {
   const [events, setEvents] = useState<Event[]>([])
   const [shifts, setShifts] = useState<ShiftInfo[]>([])
   const [termWeeks, setTermWeeks] = useState<TermWeek[]>([])
+  const [inductionDates, setInductionDates] = useState<InductionDate[]>([])
   const [eventsLoading, setEventsLoading] = useState(false)
   const [selectedShift, setSelectedShift] = useState<ShiftInfo | null>(null)
   const [userStatus, setUserStatus] = useState<UserStatus | null>(null)
@@ -142,8 +143,14 @@ function EventsPage() {
     loadEvents()
     getTermWeeks().then(setTermWeeks)
     if (isLoggedIn()) {
-      loadShifts()
-      loadUserStatus()
+      loadUserStatus().then((status) => {
+        if (status && !status.induction_completed) {
+          getInductionDates().then(setInductionDates).catch(err => console.error('Failed to load induction dates:', err))
+        }
+        if (status && status.induction_completed) {
+          loadShifts()
+        }
+      })
     }
   }, [])
 
@@ -157,12 +164,14 @@ function EventsPage() {
     }
   }, [shifts])
 
-  const loadUserStatus = async () => {
+  const loadUserStatus = async (): Promise<UserStatus | null> => {
     try {
       const status = await getUserStatus()
       setUserStatus(status)
+      return status
     } catch (err) {
       console.error('Failed to load user status:', err)
+      return null
     }
   }
 
@@ -214,6 +223,23 @@ function EventsPage() {
     const shift = shifts.find(s => s.date === dateStr)
     if (shift) {
       setSelectedShift(shift)
+    } else if (userStatus && !userStatus.induction_completed) {
+      // For pre-induction users, create a minimal ShiftInfo so the modal can show induction signup
+      const inductionDate = inductionDates.find(d => d.date === dateStr)
+      setSelectedShift({
+        date: dateStr,
+        event_title: null,
+        event_description: null,
+        max_volunteers: 0,
+        requires_contract: false,
+        signups_count: 0,
+        signups: [],
+        open_time: null,
+        close_time: null,
+        has_induction_availability: !!inductionDate,
+        induction_signups_count: inductionDate ? (4 - inductionDate.slots_remaining) : 0,
+        current_user_induction_available: false,
+      })
     }
   }
 
@@ -231,15 +257,33 @@ function EventsPage() {
 
       {isLoggedIn() && userStatus && (
         <div style={{ padding: '10px 20px', backgroundColor: '#e7f3ff', borderRadius: '4px', marginBottom: '20px' }}>
-          <strong>Shift Signup:</strong> Click on any date to view shift details and sign up.
-          <br />
-          <span style={{ fontSize: '14px', color: '#666' }}>
-            {!userStatus.induction_completed ? (
-              <>🔴 Red = No volunteers | 🟡 Yellow = Needs volunteers | ⚪ Grey = No committee (induction only) | No color = Fully staffed</>
-            ) : (
-              <>🔴 Red = No volunteers | 🟡 Yellow = Needs more volunteers | No color = Fully staffed</>
-            )}
-          </span>
+          {!userStatus.induction_completed ? (
+            <>
+              <strong>Induction Signup:</strong> Click on a blue date to sign up for an induction.
+              <br />
+              <span style={{ fontSize: '14px', color: '#666' }}>
+                🔵 Blue = Induction available | Click to sign up for an induction
+              </span>
+            </>
+          ) : !userStatus.supervised_shift_completed ? (
+            <>
+              <strong>Shift Signup:</strong> Click on any date to view shift details and sign up.
+              <br />
+              <span style={{ fontSize: '14px', color: '#666' }}>
+                🔴 Red = No volunteers | 🟡 Yellow = Needs more volunteers | No color = Fully staffed
+                <br />
+                Note: Your first shift must be supervised by a committee member.
+              </span>
+            </>
+          ) : (
+            <>
+              <strong>Shift Signup:</strong> Click on any date to view shift details and sign up.
+              <br />
+              <span style={{ fontSize: '14px', color: '#666' }}>
+                🔴 Red = No volunteers | 🟡 Yellow = Needs more volunteers | No color = Fully staffed
+              </span>
+            </>
+          )}
         </div>
       )}
 
@@ -251,6 +295,7 @@ function EventsPage() {
           shifts={isLoggedIn() ? shifts : undefined}
           userStatus={userStatus}
           termWeeks={termWeeks}
+          inductionDates={inductionDates.length > 0 ? inductionDates : undefined}
           onDateClick={isLoggedIn() ? handleDateClick : undefined}
           onSelectEvent={(event) => handleDateClick(event.start)}
           defaultDate={new Date()}

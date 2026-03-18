@@ -39,6 +39,9 @@ pub struct ShiftInfo {
     pub signups: Vec<ShiftSignupUser>,
     pub open_time: Option<String>,
     pub close_time: Option<String>,
+    pub has_induction_availability: bool,
+    pub induction_signups_count: i32,
+    pub current_user_induction_available: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, TS)]
@@ -51,7 +54,7 @@ pub struct UserShift {
 // Get shift information for a date range (authenticated)
 pub async fn get_shifts(
     State(state): State<AppState>,
-    AuthenticatedUser(_user): AuthenticatedUser,
+    AuthenticatedUser(user): AuthenticatedUser,
     Query(params): Query<ShiftsQuery>,
 ) -> Result<Json<Vec<ShiftInfo>>, (StatusCode, Json<ErrorResponse>)> {
     info!("📋 Fetching shifts from {} to {}", params.start_date, params.end_date);
@@ -95,6 +98,42 @@ pub async fn get_shifts(
     for row in bar_hours_rows {
         bar_hours_map.insert(row.day_of_week, (row.open_time, row.close_time));
     }
+
+    // Pre-fetch induction availability and signup counts for the date range
+    let induction_avail_dates: Vec<(String,)> = sqlx::query_as(
+        "SELECT DISTINCT shift_date FROM induction_availability WHERE shift_date >= ? AND shift_date <= ?"
+    )
+    .bind(&params.start_date)
+    .bind(&params.end_date)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+    let induction_avail_set: std::collections::HashSet<String> = induction_avail_dates.into_iter().map(|(d,)| d).collect();
+
+    let induction_counts: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT shift_date, COUNT(*) FROM induction_signups WHERE shift_date >= ? AND shift_date <= ? GROUP BY shift_date"
+    )
+    .bind(&params.start_date)
+    .bind(&params.end_date)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+    let induction_count_map: std::collections::HashMap<String, i64> = induction_counts.into_iter().collect();
+
+    // Current user's own induction availability (for committee members)
+    let user_induction_avail: Vec<(String,)> = sqlx::query_as(
+        "SELECT shift_date FROM induction_availability WHERE committee_user_id = ? AND shift_date >= ? AND shift_date <= ?"
+    )
+    .bind(&user.id)
+    .bind(&params.start_date)
+    .bind(&params.end_date)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+    let user_induction_avail_set: std::collections::HashSet<String> = user_induction_avail.into_iter().map(|(d,)| d).collect();
+
+    // Pre-induction users don't see shift signup details
+    let hide_signups = !user.induction_completed;
 
     let mut shifts = Vec::new();
     let mut current_date = start;
@@ -206,23 +245,32 @@ pub async fn get_shifts(
             Some(event_descriptions.join(" | "))
         };
 
-        shifts.push(ShiftInfo {
-            date: date_str,
-            event_title: combined_title,
-            event_description: combined_description,
-            max_volunteers,
-            requires_contract,
-            signups_count: signups.len() as i32,
-            signups: signups
+        let signup_users: Vec<ShiftSignupUser> = if hide_signups {
+            Vec::new() // Pre-induction users don't see who is signed up
+        } else {
+            signups
                 .into_iter()
                 .map(|s| ShiftSignupUser {
                     user_id: s.user_id,
                     display_name: s.display_name,
                     is_committee: s.is_committee,
                 })
-                .collect(),
+                .collect()
+        };
+
+        shifts.push(ShiftInfo {
+            date: date_str.clone(),
+            event_title: combined_title,
+            event_description: combined_description,
+            max_volunteers,
+            requires_contract,
+            signups_count: if hide_signups { 0 } else { signup_users.len() as i32 },
+            signups: signup_users,
             open_time: bar_hours.map(|(o, _)| o.clone()),
             close_time: bar_hours.map(|(_, c)| c.clone()),
+            has_induction_availability: induction_avail_set.contains(&date_str),
+            induction_signups_count: *induction_count_map.get(&date_str).unwrap_or(&0) as i32,
+            current_user_induction_available: user_induction_avail_set.contains(&date_str),
         });
 
         current_date = current_date.succ_opt().ok_or_else(|| {
@@ -258,19 +306,18 @@ pub async fn signup_for_shift(
             )
         })?;
 
-    // Check if user has completed code of conduct and food safety (minimum requirement)
-    if !user.code_of_conduct_signed || !user.food_safety_completed {
+    // Must have completed induction, CoC, and food safety before signing up for shifts
+    if !user.induction_completed || !user.code_of_conduct_signed || !user.food_safety_completed {
         return Err((
             StatusCode::FORBIDDEN,
             Json(ErrorResponse {
-                error: "You must complete the code of conduct and food safety training before signing up for shifts".to_string(),
+                error: "You must complete your induction, code of conduct, and food safety training before signing up for shifts".to_string(),
             }),
         ));
     }
 
-    // If not fully inducted, can only sign up for shifts with committee members
-    if !user.induction_completed {
-        // Check if any committee member is already signed up
+    // If supervised shift not completed, can only sign up for shifts with committee members present
+    if !user.supervised_shift_completed {
         #[derive(sqlx::FromRow)]
         struct CommitteeCheckRow {
             committee_count: i32,
@@ -299,7 +346,7 @@ pub async fn signup_for_shift(
             return Err((
                 StatusCode::FORBIDDEN,
                 Json(ErrorResponse {
-                    error: "You must complete your induction before signing up for shifts. Induction shifts require a committee member to be present - please choose a shift where a committee member is already signed up.".to_string(),
+                    error: "You need to complete a supervised shift first. Please choose a shift where a committee member is already signed up.".to_string(),
                 }),
             ));
         }

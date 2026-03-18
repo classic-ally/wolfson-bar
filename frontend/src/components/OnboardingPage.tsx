@@ -1,24 +1,32 @@
 import { useEffect, useState } from 'react'
-import { getUserStatus, UserStatus, acceptCodeOfConduct, uploadCertificate, getVerificationToken, updateDisplayName, submitContractRequest, acceptPrivacy, startPasskeySetup } from '../lib/auth'
+import { getUserStatus, UserStatus, acceptCodeOfConduct, uploadCertificate, updateDisplayName, submitContractRequest, acceptPrivacy, startPasskeySetup, getInductionDates, signupForInduction, cancelInductionSignup, InductionDate } from '../lib/auth'
 import CodeOfConduct from './CodeOfConduct'
-import QRCode from 'qrcode'
 
 export default function OnboardingPage() {
   const [status, setStatus] = useState<UserStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [showCoc, setShowCoc] = useState(false)
   const [uploading, setUploading] = useState(false)
-  const [showQR, setShowQR] = useState(false)
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [editingName, setEditingName] = useState(false)
   const [newDisplayName, setNewDisplayName] = useState('')
   const [contractExpiryDate, setContractExpiryDate] = useState('')
   const [submittingContract, setSubmittingContract] = useState(false)
   const [settingUpPasskey, setSettingUpPasskey] = useState(false)
+  const [inductionDates, setInductionDates] = useState<InductionDate[]>([])
+  const [inductionSignupDate, setInductionSignupDate] = useState<string | null>(null)
+  const [selectedInductionDate, setSelectedInductionDate] = useState<string | null>(null)
+  const [inductionFullShift, setInductionFullShift] = useState(false)
+  const [signingUpInduction, setSigningUpInduction] = useState(false)
 
   useEffect(() => {
     loadStatus()
   }, [])
+
+  useEffect(() => {
+    if (status && !status.induction_completed) {
+      loadInductionDates()
+    }
+  }, [status?.induction_completed])
 
   const loadStatus = async () => {
     try {
@@ -28,6 +36,23 @@ export default function OnboardingPage() {
       console.error('Failed to fetch status:', err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadInductionDates = async () => {
+    try {
+      const dates = await getInductionDates()
+      setInductionDates(dates)
+      // Restore signup state from API
+      const signedUp = dates.find(d => d.user_signed_up)
+      if (signedUp) {
+        setInductionSignupDate(signedUp.date)
+        setInductionFullShift(signedUp.user_signed_up_full_shift)
+      } else {
+        setInductionSignupDate(null)
+      }
+    } catch (err) {
+      console.error('Failed to fetch induction dates:', err)
     }
   }
 
@@ -85,15 +110,36 @@ export default function OnboardingPage() {
     }
   }
 
-  const handleShowQR = async () => {
+  const handleInductionSignup = async () => {
+    if (!selectedInductionDate) return
+    setSigningUpInduction(true)
     try {
-      const token = await getVerificationToken('induction')
-      const qr = await QRCode.toDataURL(token, { width: 300 })
-      setQrDataUrl(qr)
-      setShowQR(true)
+      await signupForInduction(selectedInductionDate, inductionFullShift)
+      setInductionSignupDate(selectedInductionDate)
+      setSelectedInductionDate(null)
+      setInductionFullShift(false)
+      alert('Signed up for induction successfully!')
+      loadInductionDates()
+      loadStatus()
     } catch (err) {
-      console.error('Failed to generate QR code:', err)
-      alert('Failed to generate QR code. Please try again.')
+      console.error('Failed to sign up for induction:', err)
+      alert(err instanceof Error ? err.message : 'Failed to sign up for induction. Please try again.')
+    } finally {
+      setSigningUpInduction(false)
+    }
+  }
+
+  const handleCancelInduction = async (date: string) => {
+    try {
+      await cancelInductionSignup(date)
+      setInductionSignupDate(null)
+      setInductionFullShift(false)
+      alert('Induction signup cancelled.')
+      loadInductionDates()
+      loadStatus()
+    } catch (err) {
+      console.error('Failed to cancel induction signup:', err)
+      alert(err instanceof Error ? err.message : 'Failed to cancel induction signup. Please try again.')
     }
   }
 
@@ -166,44 +212,16 @@ export default function OnboardingPage() {
     return <CodeOfConduct onAccept={handleCocAccept} onDecline={handleCocDecline} />
   }
 
-  if (showQR && qrDataUrl) {
-    return (
-      <div style={{ maxWidth: '500px', margin: '40px auto', padding: '20px', textAlign: 'center' }}>
-        <h2>Induction Verification QR Code</h2>
-        <p style={{ color: '#666', marginBottom: '20px' }}>
-          Show this QR code to a committee member during your induction shift.
-          This code expires in 5 minutes.
-        </p>
-        <div style={{
-          backgroundColor: 'white',
-          padding: '20px',
-          borderRadius: '8px',
-          border: '2px solid #ddd',
-          marginBottom: '20px'
-        }}>
-          <img src={qrDataUrl} alt="Verification QR Code" style={{ maxWidth: '100%' }} />
-        </div>
-        <button
-          onClick={() => setShowQR(false)}
-          style={{
-            padding: '10px 20px',
-            backgroundColor: '#666',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-          }}
-        >
-          Close
-        </button>
-      </div>
-    )
-  }
-
   const isFullyOnboarded =
     status.code_of_conduct_signed &&
     status.food_safety_completed &&
-    status.induction_completed
+    status.induction_completed &&
+    status.supervised_shift_completed
+
+  const formatInductionDate = (dateStr: string) => {
+    const date = new Date(dateStr + 'T00:00:00')
+    return date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+  }
 
   return (
     <div style={{ maxWidth: '800px', margin: '40px auto', padding: '20px' }}>
@@ -337,7 +355,7 @@ export default function OnboardingPage() {
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-        {/* Privacy Notice */}
+        {/* 1. Privacy Notice */}
         <div style={{
           border: '1px solid #ddd',
           borderRadius: '8px',
@@ -382,7 +400,129 @@ export default function OnboardingPage() {
           )}
         </div>
 
-        {/* Code of Conduct */}
+        {/* 2. Induction */}
+        <div style={{
+          border: '1px solid #ddd',
+          borderRadius: '8px',
+          padding: '20px',
+          backgroundColor: status.induction_completed ? '#f0f9ff' : 'white'
+        }}>
+          <h3 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {status.induction_completed ? '✅' : '☐'} Induction
+          </h3>
+          <p style={{ color: '#666', fontSize: '14px' }}>
+            Attend a 7:45–8:30 induction session with a committee member.
+          </p>
+          {!status.induction_completed && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {inductionSignupDate ? (
+                <div style={{
+                  backgroundColor: '#d4edda',
+                  border: '1px solid #c3e6cb',
+                  borderRadius: '4px',
+                  padding: '12px'
+                }}>
+                  <p style={{ margin: '0 0 8px 0', color: '#155724', fontSize: '14px' }}>
+                    You are signed up for induction on <strong>{formatInductionDate(inductionSignupDate)}</strong>
+                  </p>
+                  <button
+                    onClick={() => handleCancelInduction(inductionSignupDate)}
+                    style={{
+                      padding: '6px 12px',
+                      backgroundColor: '#dc3545',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      fontSize: '13px'
+                    }}
+                  >
+                    Cancel Signup
+                  </button>
+                </div>
+              ) : inductionDates.length === 0 ? (
+                <p style={{ color: '#888', fontSize: '14px', margin: 0 }}>
+                  No induction dates currently available. Check back soon.
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <select
+                    value={selectedInductionDate || ''}
+                    onChange={(e) => {
+                      setSelectedInductionDate(e.target.value || null)
+                      setInductionFullShift(false)
+                    }}
+                    style={{
+                      padding: '10px',
+                      border: '1px solid #ddd',
+                      borderRadius: '4px',
+                      fontSize: '14px',
+                      backgroundColor: 'white',
+                    }}
+                  >
+                    <option value="">Select an induction date...</option>
+                    {inductionDates.filter(d => d.slots_remaining > 0).map(d => (
+                      <option key={d.date} value={d.date}>
+                        {formatInductionDate(d.date)} — {d.slots_remaining}/4 slots{d.has_full_shift_committee ? ' (full shift available)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedInductionDate && (() => {
+                    const selectedDate = inductionDates.find(d => d.date === selectedInductionDate)
+                    const dateHasFullShift = selectedDate?.has_full_shift_committee ?? false
+                    return (
+                      <div style={{
+                        padding: '12px',
+                        border: '1px solid #e0e0e0',
+                        borderRadius: '6px',
+                        backgroundColor: '#fafafa',
+                      }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '12px' }}>
+                          <label style={{ fontSize: '13px', color: '#555', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <input type="checkbox" checked disabled />
+                            Induction (7:45–8:30)
+                          </label>
+                          <label style={{ fontSize: '13px', color: dateHasFullShift ? '#555' : '#aaa', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <input
+                              type="checkbox"
+                              checked={inductionFullShift}
+                              onChange={(e) => setInductionFullShift(e.target.checked)}
+                              disabled={!dateHasFullShift}
+                            />
+                            Also do supervised shift (full evening)
+                            {!dateHasFullShift && (
+                              <span style={{ fontSize: '11px', color: '#999' }}> — committee member not on full shift</span>
+                            )}
+                          </label>
+                        </div>
+                        <button
+                          onClick={handleInductionSignup}
+                          disabled={signingUpInduction}
+                          style={{
+                            padding: '8px 16px',
+                            backgroundColor: signingUpInduction ? '#ccc' : '#8B0000',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: signingUpInduction ? 'not-allowed' : 'pointer',
+                            fontSize: '13px'
+                          }}
+                        >
+                          {signingUpInduction ? 'Signing up...' : 'Sign Up for Induction'}
+                        </button>
+                      </div>
+                    )
+                  })()}
+                </div>
+              )}
+            </div>
+          )}
+          {status.induction_completed && (
+            <span style={{ color: '#0066cc', fontSize: '14px' }}>Completed ✓</span>
+          )}
+        </div>
+
+        {/* 3. Code of Conduct */}
         <div style={{
           border: '1px solid #ddd',
           borderRadius: '8px',
@@ -415,7 +555,7 @@ export default function OnboardingPage() {
           )}
         </div>
 
-        {/* Food Safety */}
+        {/* 4. Food Safety */}
         <div style={{
           border: '1px solid #ddd',
           borderRadius: '8px',
@@ -464,40 +604,38 @@ export default function OnboardingPage() {
           )}
         </div>
 
-        {/* Induction Shift */}
+        {/* 5. Supervised Shift */}
         <div style={{
           border: '1px solid #ddd',
           borderRadius: '8px',
           padding: '20px',
-          backgroundColor: status.induction_completed ? '#f0f9ff' : 'white'
+          backgroundColor: status.supervised_shift_completed ? '#f0f9ff' : 'white'
         }}>
           <h3 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
-            {status.induction_completed ? '✅' : '☐'} Induction Shift
+            {status.supervised_shift_completed ? '✅' : '☐'} Supervised Shift
           </h3>
           <p style={{ color: '#666', fontSize: '14px' }}>
-            Complete an induction shift with an experienced rota member.
+            {status.supervised_shift_completed
+              ? 'You have completed a supervised shift.'
+              : 'Complete a full shift with a committee member present. This can be done alongside your induction if the committee member is available for the full evening, or separately afterwards.'
+            }
           </p>
-          {!status.induction_completed && (
-            <button
-              onClick={handleShowQR}
-              style={{
-                padding: '8px 16px',
-                backgroundColor: '#8B0000',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer'
-              }}
-            >
-              Show QR Code for Verification
-            </button>
+          {!status.supervised_shift_completed && !status.induction_completed && (
+            <p style={{ color: '#888', fontSize: '13px', margin: 0, fontStyle: 'italic' }}>
+              Tip: When signing up for induction above, select "Also do supervised shift" if a committee member is available for the full evening.
+            </p>
           )}
-          {status.induction_completed && (
+          {!status.supervised_shift_completed && status.induction_completed && status.code_of_conduct_signed && status.food_safety_completed && (
+            <p style={{ color: '#888', fontSize: '13px', margin: 0 }}>
+              Check the calendar for shifts where a committee member is signed up.
+            </p>
+          )}
+          {status.supervised_shift_completed && (
             <span style={{ color: '#0066cc', fontSize: '14px' }}>Completed ✓</span>
           )}
         </div>
 
-        {/* Contract (Optional) */}
+        {/* 6. Contract (Optional) */}
         <div style={{
           border: '1px solid #ddd',
           borderRadius: '8px',
@@ -557,7 +695,7 @@ export default function OnboardingPage() {
           )}
         </div>
 
-        {/* Passkey Setup (Optional, shown after all required steps) */}
+        {/* 7. Passkey Setup (Optional, shown after all required steps) */}
         {isFullyOnboarded && !status.has_passkey && (
           <div style={{
             border: '1px solid #b8daff',

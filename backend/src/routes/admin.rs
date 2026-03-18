@@ -241,6 +241,7 @@ pub async fn get_active_members(
          WHERE code_of_conduct_signed = TRUE
          AND food_safety_completed = TRUE
          AND induction_completed = TRUE
+         AND supervised_shift_completed = TRUE
          ORDER BY display_name ASC"
     )
     .fetch_all(&state.db)
@@ -457,7 +458,8 @@ pub async fn get_overview_stats(
         "SELECT COUNT(*) FROM users
          WHERE code_of_conduct_signed = TRUE
          AND food_safety_completed = TRUE
-         AND induction_completed = TRUE"
+         AND induction_completed = TRUE
+         AND supervised_shift_completed = TRUE"
     )
     .fetch_one(&state.db)
     .await
@@ -542,6 +544,7 @@ pub struct UserListItem {
     pub is_admin: bool,
     pub code_of_conduct_signed: bool,
     pub induction_completed: bool,
+    pub supervised_shift_completed: bool,
     pub created_at: String,
 }
 
@@ -578,6 +581,7 @@ pub async fn get_all_users(
             is_admin: u.is_admin,
             code_of_conduct_signed: u.code_of_conduct_signed,
             induction_completed: u.induction_completed,
+            supervised_shift_completed: u.supervised_shift_completed,
             created_at: u.created_at,
         })
         .collect();
@@ -1100,5 +1104,30 @@ pub async fn admin_set_contract(
     }
 
     info!("✅ Contract set for user {}", target_user_id);
+    Ok(StatusCode::OK)
+}
+
+/// Clear contract for a user (admin only)
+pub async fn admin_clear_contract(
+    State(state): State<AppState>,
+    AdminUser(admin): AdminUser,
+    Path(target_user_id): Path<String>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    info!("📋 Admin {} clearing contract for user {}", admin.id, target_user_id);
+
+    let result = sqlx::query("UPDATE users SET has_contract = FALSE, contract_expiry_date = NULL WHERE id = ?")
+        .bind(&target_user_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            error!("❌ Failed to clear contract: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Failed to clear contract".to_string() }))
+        })?;
+
+    if result.rows_affected() == 0 {
+        return Err((StatusCode::NOT_FOUND, Json(ErrorResponse { error: "User not found".to_string() })));
+    }
+
+    info!("✅ Contract cleared for user {}", target_user_id);
     Ok(StatusCode::OK)
 }

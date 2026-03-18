@@ -46,41 +46,46 @@ pub async fn request_magic_link(
         }
     };
 
-    // Rate limit per-email: max 3 per hour
-    let email_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM magic_link_tokens WHERE email = ? AND created_at > datetime('now', '-1 hour')"
-    )
-    .bind(&email)
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(0);
-
-    if email_count >= 3 {
-        return Err((
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(ErrorResponse {
-                error: "Too many magic link requests. Please try again later.".to_string(),
-            }),
-        ));
-    }
-
-    // Rate limit per-IP: max 10 per hour
     let ip_str = addr.ip().to_string();
-    let ip_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM magic_link_tokens WHERE ip_address = ? AND created_at > datetime('now', '-1 hour')"
-    )
-    .bind(&ip_str)
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(0);
 
-    if ip_count >= 10 {
-        return Err((
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(ErrorResponse {
-                error: "Too many requests from this IP. Please try again later.".to_string(),
-            }),
-        ));
+    // Rate limiting disabled in debug builds for easier testing
+    #[cfg(not(debug_assertions))]
+    {
+        // Rate limit per-email: max 3 per hour
+        let email_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM magic_link_tokens WHERE email = ? AND created_at > datetime('now', '-1 hour')"
+        )
+        .bind(&email)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(0);
+
+        if email_count >= 3 {
+            return Err((
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(ErrorResponse {
+                    error: "Too many magic link requests. Please try again later.".to_string(),
+                }),
+            ));
+        }
+
+        // Rate limit per-IP: max 10 per hour
+        let ip_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM magic_link_tokens WHERE ip_address = ? AND created_at > datetime('now', '-1 hour')"
+        )
+        .bind(&ip_str)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(0);
+
+        if ip_count >= 10 {
+            return Err((
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(ErrorResponse {
+                    error: "Too many requests from this IP. Please try again later.".to_string(),
+                }),
+            ));
+        }
     }
 
     // Check if user exists with this email
