@@ -82,7 +82,9 @@ export default function AboutPage() {
       {activeTab === 'rota' && (
         <div>
           <h2>Rota Membership</h2>
-          <p>Content coming soon...</p>
+          <p style={{ fontSize: '16px', lineHeight: '1.6', color: '#333' }}>
+            If you're interested in becoming a rota member, we'd love to hear from you! Please get in touch with BarCo by email (<a href="mailto:barco@wolfson.ox.ac.uk" style={{ color: '#8B0000', textDecoration: 'underline' }}>barco@wolfson.ox.ac.uk</a>), or alternatively, create an account and sign up for an induction shift to get started.
+          </p>
         </div>
       )}
 
