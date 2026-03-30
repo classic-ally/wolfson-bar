@@ -165,7 +165,7 @@ pub async fn verify_magic_link(
 
     // Look up unused token, check age
     let token_record: Option<(String, String, String)> = sqlx::query_as(
-        "SELECT id, email, created_at FROM magic_link_tokens WHERE token = ? AND used = FALSE"
+        "SELECT id, email, created_at FROM magic_link_tokens WHERE token = ?"
     )
     .bind(&params.token)
     .fetch_optional(&state.db)
@@ -180,7 +180,7 @@ pub async fn verify_magic_link(
         )
     })?;
 
-    let (token_id, email, created_at) = token_record.ok_or_else(|| {
+    let (_token_id, email, created_at) = token_record.ok_or_else(|| {
         (
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
@@ -210,13 +210,6 @@ pub async fn verify_magic_link(
             }),
         ));
     }
-
-    // Mark token as used
-    sqlx::query("UPDATE magic_link_tokens SET used = TRUE WHERE id = ?")
-        .bind(&token_id)
-        .execute(&state.db)
-        .await
-        .ok();
 
     // Look up user by email
     let user: (String, bool, bool) = sqlx::query_as(
