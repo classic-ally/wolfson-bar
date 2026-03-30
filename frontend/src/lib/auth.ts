@@ -936,6 +936,7 @@ export async function createStockTransactions(request: CreateTransactionsRequest
 export interface UserListItem {
   id: string
   display_name: string | null
+  email: string | null
   is_committee: boolean
   is_admin: boolean
   code_of_conduct_signed: boolean
@@ -1107,6 +1108,19 @@ export async function adminSetContract(userId: string, expiryDate: string): Prom
   if (!response.ok) {
     const error = await response.json()
     throw new AuthError(error.error || 'Failed to set contract')
+  }
+}
+
+export async function adminSetEmail(userId: string, email: string): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/users/${userId}/set-email`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to set email')
   }
 }
 

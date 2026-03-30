@@ -540,6 +540,7 @@ pub async fn get_overview_stats(
 pub struct UserListItem {
     pub id: String,
     pub display_name: Option<String>,
+    pub email: Option<String>,
     pub is_committee: bool,
     pub is_admin: bool,
     pub code_of_conduct_signed: bool,
@@ -577,6 +578,7 @@ pub async fn get_all_users(
         .map(|u| UserListItem {
             id: u.id,
             display_name: u.display_name,
+            email: u.email,
             is_committee: u.is_committee,
             is_admin: u.is_admin,
             code_of_conduct_signed: u.code_of_conduct_signed,
@@ -1129,5 +1131,42 @@ pub async fn admin_clear_contract(
     }
 
     info!("✅ Contract cleared for user {}", target_user_id);
+    Ok(StatusCode::OK)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AdminSetEmailRequest {
+    pub email: String,
+}
+
+/// Set email for a user (admin only)
+pub async fn admin_set_email(
+    State(state): State<AppState>,
+    AdminUser(admin): AdminUser,
+    Path(target_user_id): Path<String>,
+    Json(req): Json<AdminSetEmailRequest>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    info!("📧 Admin {} setting email for user {}", admin.id, target_user_id);
+
+    let email = req.email.trim().to_lowercase();
+    if !email.contains('@') || !email.contains('.') {
+        return Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Invalid email address".to_string() })));
+    }
+
+    let result = sqlx::query("UPDATE users SET email = ? WHERE id = ?")
+        .bind(&email)
+        .bind(&target_user_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            error!("❌ Failed to set email: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Failed to set email".to_string() }))
+        })?;
+
+    if result.rows_affected() == 0 {
+        return Err((StatusCode::NOT_FOUND, Json(ErrorResponse { error: "User not found".to_string() })));
+    }
+
+    info!("✅ Email set for user {}", target_user_id);
     Ok(StatusCode::OK)
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { getAllUsers, promoteUser, demoteUser, deleteUser, markCoC, markInduction, markSupervisedShift, adminUploadCertificate, adminSetContract, adminClearContract, UserListItem, getUserId } from '../../lib/auth'
+import { getAllUsers, promoteUser, demoteUser, deleteUser, markCoC, markInduction, markSupervisedShift, adminUploadCertificate, adminSetContract, adminClearContract, adminSetEmail, UserListItem, getUserId } from '../../lib/auth'
 import { usePageTitle } from '../../hooks/usePageTitle'
 
 function ActionsDropdown({ user, currentUserId, isLastAdmin, actionInProgress, onAction }: {
@@ -31,6 +31,7 @@ function ActionsDropdown({ user, currentUserId, isLastAdmin, actionInProgress, o
     { label: 'Mark Inducted', action: 'mark-induction', show: !user.induction_completed },
     { label: 'Mark Supervised Shift', action: 'mark-supervised', show: !user.supervised_shift_completed },
     { label: 'Upload Certificate', action: 'upload-cert', show: true },
+    { label: 'Set Email', action: 'set-email', show: true },
     { label: 'Manage Contract', action: 'manage-contract', show: true },
     { label: 'Delete', action: 'delete', show: user.id !== currentUserId, color: '#dc3545', disabledReason: isLastAdmin ? 'Last admin' : undefined },
   ]
@@ -354,6 +355,20 @@ export default function AdminUsers() {
         input.click()
         break
       }
+      case 'set-email': {
+        const email = prompt('Enter new email for ' + (user.display_name || 'this user') + ':', user.email || '')
+        if (!email) return
+        setActionInProgress(userId)
+        try {
+          await adminSetEmail(userId, email)
+          await loadUsers()
+        } catch (err) {
+          alert(err instanceof Error ? err.message : 'Failed to set email')
+        } finally {
+          setActionInProgress(null)
+        }
+        break
+      }
       case 'manage-contract': {
         setContractModal({ userId, userName: user.display_name || 'Unknown' })
         break
@@ -465,6 +480,7 @@ export default function AdminUsers() {
                     )}
                   </div>
                   <div style={{ color: '#666', fontSize: '12px' }}>{user.id}</div>
+                  {user.email && <div style={{ color: '#888', fontSize: '12px' }}>{user.email}</div>}
                 </td>
                 <td style={{ padding: '12px 16px' }}>
                   {getRoleBadge(user)}
