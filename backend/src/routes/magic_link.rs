@@ -69,7 +69,7 @@ pub async fn request_magic_link(
             ));
         }
 
-        // Rate limit per-IP: max 10 per hour
+        // Rate limit per-IP: max 50 per hour (generous due to shared NAT on eduroam)
         let ip_count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM magic_link_tokens WHERE ip_address = ? AND created_at > datetime('now', '-1 hour')"
         )
@@ -78,7 +78,7 @@ pub async fn request_magic_link(
         .await
         .unwrap_or(0);
 
-        if ip_count >= 10 {
+        if ip_count >= 50 {
             return Err((
                 StatusCode::TOO_MANY_REQUESTS,
                 Json(ErrorResponse {
