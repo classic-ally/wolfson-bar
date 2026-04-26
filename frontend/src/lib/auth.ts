@@ -403,6 +403,29 @@ export async function getActiveMembers(): Promise<ActiveMember[]> {
   return response.json()
 }
 
+import type { UnallocatedMember } from '../types/UnallocatedMember'
+export type { UnallocatedMember }
+
+/**
+ * Get rota members with no shift signups in the given date range. Committee only.
+ */
+export async function getUnallocatedMembers(
+  startDate: string,
+  endDate: string,
+): Promise<UnallocatedMember[]> {
+  const params = new URLSearchParams({ start_date: startDate, end_date: endDate })
+  const response = await authenticatedFetch(
+    `${API_BASE}/api/admin/unallocated-users?${params.toString()}`,
+  )
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to get unallocated members')
+  }
+
+  return response.json()
+}
+
 
 /**
  * Submit contract request with expiry date

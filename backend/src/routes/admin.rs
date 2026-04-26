@@ -1,5 +1,5 @@
 use axum::{
-    extract::{State, Path},
+    extract::{Query, State, Path},
     http::{StatusCode, header},
     Json,
     response::Response,
@@ -37,6 +37,32 @@ pub struct PendingContract {
     pub user_id: String,
     pub display_name: Option<String>,
     pub contract_expiry_date: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UnallocatedMember {
+    pub user_id: String,
+    pub display_name: Option<String>,
+    pub has_contract: bool,
+    pub contract_expiry_date: Option<String>,
+    /// Most recent shift_signups.shift_date for this user across all time, null if never.
+    pub last_shift_date: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UnallocatedQuery {
+    pub start_date: String,
+    pub end_date: String,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct UnallocatedRow {
+    id: String,
+    display_name: Option<String>,
+    has_contract: bool,
+    contract_expiry_date: Option<String>,
+    last_shift_date: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -267,6 +293,57 @@ pub async fn get_active_members(
 
     info!("✅ Found {} active members", members.len());
 
+    Ok(Json(members))
+}
+
+/// Get rota members with no shift signups in the requested date range.
+/// Used by the Rota Manager page to surface allocation candidates.
+pub async fn get_unallocated_users(
+    State(state): State<AppState>,
+    CommitteeUser(user): CommitteeUser,
+    Query(params): Query<UnallocatedQuery>,
+) -> Result<Json<Vec<UnallocatedMember>>, (StatusCode, Json<ErrorResponse>)> {
+    chrono::NaiveDate::parse_from_str(&params.start_date, "%Y-%m-%d").map_err(|_| (
+        StatusCode::BAD_REQUEST,
+        Json(ErrorResponse { error: "Invalid start_date format".to_string() }),
+    ))?;
+    chrono::NaiveDate::parse_from_str(&params.end_date, "%Y-%m-%d").map_err(|_| (
+        StatusCode::BAD_REQUEST,
+        Json(ErrorResponse { error: "Invalid end_date format".to_string() }),
+    ))?;
+
+    let rows = sqlx::query_as::<_, UnallocatedRow>(&format!(
+        "SELECT u.id, u.display_name, u.has_contract, u.contract_expiry_date,
+                (SELECT MAX(shift_date) FROM shift_signups s WHERE s.user_id = u.id) AS last_shift_date
+         FROM users u
+         WHERE {IS_ROTA_MEMBER_SQL}
+           AND u.id NOT IN (
+               SELECT user_id FROM shift_signups
+               WHERE shift_date BETWEEN ?1 AND ?2
+           )
+         ORDER BY u.display_name ASC"
+    ))
+    .bind(&params.start_date)
+    .bind(&params.end_date)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        error!("❌ Failed to fetch unallocated users: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: "Failed to fetch unallocated users".to_string() }),
+        )
+    })?;
+
+    let members: Vec<UnallocatedMember> = rows.into_iter().map(|r| UnallocatedMember {
+        user_id: r.id,
+        display_name: r.display_name,
+        has_contract: r.has_contract,
+        contract_expiry_date: r.contract_expiry_date,
+        last_shift_date: r.last_shift_date,
+    }).collect();
+
+    info!("✅ Committee {} fetched {} unallocated members for {}–{}", user.id, members.len(), params.start_date, params.end_date);
     Ok(Json(members))
 }
 
@@ -1169,4 +1246,198 @@ pub async fn admin_set_email(
 
     info!("✅ Email set for user {}", target_user_id);
     Ok(StatusCode::OK)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::create_jwt_token;
+    use crate::test_util::{insert_shift_signup, insert_user, test_state, user_with, user_with_role};
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode as Status};
+    use axum::routing::get;
+    use axum::Router;
+    use tower::ServiceExt;
+
+    fn rota_member(committee: bool) -> User {
+        let mut u = user_with(true, true, true, true);
+        u.is_committee = committee;
+        u
+    }
+
+    fn unallocated_query(start: &str, end: &str) -> Query<UnallocatedQuery> {
+        Query(UnallocatedQuery {
+            start_date: start.to_string(),
+            end_date: end.to_string(),
+        })
+    }
+
+    // -------- Direct-handler tests (cover SQL behavior) --------
+
+    #[tokio::test]
+    async fn unallocated_includes_rota_members_with_no_signups_in_range() {
+        let state = test_state().await;
+        let user = rota_member(true);
+        insert_user(&state.db, &user).await;
+
+        let Json(members) = get_unallocated_users(
+            State(state),
+            CommitteeUser(user.clone()),
+            unallocated_query("2026-05-01", "2026-05-31"),
+        )
+        .await
+        .expect("fetch ok");
+
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0].user_id, user.id);
+        assert_eq!(members[0].last_shift_date, None);
+    }
+
+    #[tokio::test]
+    async fn unallocated_excludes_rota_members_with_signups_in_range() {
+        let state = test_state().await;
+        let user = rota_member(true);
+        insert_user(&state.db, &user).await;
+        insert_shift_signup(&state.db, &user.id, "2026-05-15").await;
+
+        let Json(members) = get_unallocated_users(
+            State(state),
+            CommitteeUser(user.clone()),
+            unallocated_query("2026-05-01", "2026-05-31"),
+        )
+        .await
+        .expect("fetch ok");
+
+        assert!(members.is_empty(), "user with in-range signup should be excluded");
+    }
+
+    #[tokio::test]
+    async fn unallocated_includes_rota_members_whose_signups_are_outside_range() {
+        let state = test_state().await;
+        let user = rota_member(true);
+        insert_user(&state.db, &user).await;
+        insert_shift_signup(&state.db, &user.id, "2026-04-15").await;
+        insert_shift_signup(&state.db, &user.id, "2026-06-15").await;
+
+        let Json(members) = get_unallocated_users(
+            State(state),
+            CommitteeUser(user.clone()),
+            unallocated_query("2026-05-01", "2026-05-31"),
+        )
+        .await
+        .expect("fetch ok");
+
+        assert_eq!(members.len(), 1);
+        // last_shift_date is the max across all time, not within range.
+        assert_eq!(members[0].last_shift_date.as_deref(), Some("2026-06-15"));
+    }
+
+    #[tokio::test]
+    async fn unallocated_excludes_non_rota_members() {
+        let state = test_state().await;
+        // supervised_shift_completed = false → fails IS_ROTA_MEMBER_SQL
+        let mut user = user_with(true, true, true, false);
+        user.is_committee = true;
+        insert_user(&state.db, &user).await;
+
+        let Json(members) = get_unallocated_users(
+            State(state),
+            CommitteeUser(user.clone()),
+            unallocated_query("2026-05-01", "2026-05-31"),
+        )
+        .await
+        .expect("fetch ok");
+
+        assert!(members.is_empty(), "non-rota member must not appear");
+    }
+
+    #[tokio::test]
+    async fn last_shift_date_is_max_across_all_time() {
+        let state = test_state().await;
+        let user = rota_member(true);
+        insert_user(&state.db, &user).await;
+        insert_shift_signup(&state.db, &user.id, "2026-01-10").await;
+        insert_shift_signup(&state.db, &user.id, "2026-03-22").await;
+        insert_shift_signup(&state.db, &user.id, "2026-02-05").await;
+
+        let Json(members) = get_unallocated_users(
+            State(state),
+            CommitteeUser(user.clone()),
+            unallocated_query("2026-05-01", "2026-05-31"),
+        )
+        .await
+        .expect("fetch ok");
+
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0].last_shift_date.as_deref(), Some("2026-03-22"));
+    }
+
+    #[tokio::test]
+    async fn last_shift_date_is_null_for_users_with_no_signups_ever() {
+        let state = test_state().await;
+        let user = rota_member(true);
+        insert_user(&state.db, &user).await;
+
+        let Json(members) = get_unallocated_users(
+            State(state),
+            CommitteeUser(user.clone()),
+            unallocated_query("2026-05-01", "2026-05-31"),
+        )
+        .await
+        .expect("fetch ok");
+
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0].last_shift_date, None);
+    }
+
+    // -------- Router-level tests (cover the auth gate) --------
+
+    fn build_app(state: AppState) -> Router {
+        Router::new()
+            .route("/api/admin/unallocated-users", get(get_unallocated_users))
+            .with_state(state)
+    }
+
+    fn unallocated_request(token: Option<&str>) -> Request<Body> {
+        let mut builder = Request::builder()
+            .uri("/api/admin/unallocated-users?start_date=2026-05-01&end_date=2026-05-31");
+        if let Some(t) = token {
+            builder = builder.header("authorization", format!("Bearer {t}"));
+        }
+        builder.body(Body::empty()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn router_rejects_non_committee_user_with_403() {
+        let state = test_state().await;
+        // Plain user — not committee, not admin.
+        let user = user_with_role(false, false);
+        insert_user(&state.db, &user).await;
+        let token = create_jwt_token(&user.id, &state.jwt_secret).unwrap();
+
+        let response = build_app(state).oneshot(unallocated_request(Some(&token))).await.unwrap();
+        assert_eq!(response.status(), Status::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn router_rejects_unauthenticated_request_with_401() {
+        let state = test_state().await;
+        let response = build_app(state).oneshot(unallocated_request(None)).await.unwrap();
+        assert_eq!(response.status(), Status::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn router_committee_user_succeeds() {
+        let state = test_state().await;
+        let user = user_with_role(true, false);
+        insert_user(&state.db, &user).await;
+        let token = create_jwt_token(&user.id, &state.jwt_secret).unwrap();
+
+        let response = build_app(state).oneshot(unallocated_request(Some(&token))).await.unwrap();
+        assert_eq!(response.status(), Status::OK);
+
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let members: Vec<UnallocatedMember> = serde_json::from_slice(&body_bytes).unwrap();
+        assert!(members.is_empty(), "no rota members inserted");
+    }
 }

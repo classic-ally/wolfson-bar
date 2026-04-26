@@ -131,6 +131,52 @@ export const Empty: Story = {
   },
 }
 
+export const Sortable: Story = {
+  render: () => (
+    <DataTable
+      columns={[
+        {
+          key: 'name',
+          header: 'Name',
+          cell: (u) => u.display_name,
+          sortable: true,
+          sortKey: (u) => u.display_name,
+        },
+        {
+          key: 'role',
+          header: 'Role',
+          cell: (u) => {
+            const variant =
+              u.role === 'admin'
+                ? 'destructive'
+                : u.role === 'committee'
+                  ? 'default'
+                  : 'secondary'
+            return <Badge variant={variant}>{u.role[0].toUpperCase() + u.role.slice(1)}</Badge>
+          },
+          sortable: true,
+          sortKey: (u) => u.role,
+        },
+        {
+          key: 'joined',
+          header: 'Joined',
+          cell: (u) => u.joined,
+          sortable: true,
+          sortKey: (u) => u.joined,
+        },
+      ]}
+      data={fixtureUsers}
+      rowKey={(u) => u.id}
+      defaultSort={{ columnKey: 'joined', direction: 'asc' }}
+    />
+  ),
+  args: {
+    columns: baseColumns,
+    data: fixtureUsers,
+    rowKey: (u: User) => u.id,
+  },
+}
+
 export const WithRowClassName: Story = {
   render: () => (
     <DataTable

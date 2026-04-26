@@ -154,7 +154,7 @@ export default function ShiftSlotCalendar({
       defaultMonth={selected ?? fromDate}
       disabled={[{ before: fromDate }, { after: toDate }]}
       showOutsideDays={false}
-      className="rounded-lg border [--cell-size:--spacing(11)] sm:[--cell-size:--spacing(18)] md:[--cell-size:--spacing(22)] p-2 sm:p-3"
+      className="[--cell-size:--spacing(11)] sm:[--cell-size:--spacing(18)] md:[--cell-size:--spacing(22)] p-2 sm:p-3"
       classNames={{
         day: 'group/day relative h-(--cell-size) w-(--cell-size) min-w-0 rounded-md p-0 text-center align-top',
         week: 'mt-1 flex w-full justify-between gap-1',

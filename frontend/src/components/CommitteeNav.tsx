@@ -10,6 +10,7 @@ export default function CommitteeNav() {
     { path: '/committee/stock', label: 'Stock' },
     { path: '/committee/members', label: 'Members' },
     { path: '/committee/induction', label: 'Induction' },
+    { path: '/committee/rotamanager', label: 'Rota Manager' },
   ]
 
   return (

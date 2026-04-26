@@ -744,64 +744,7 @@ pub async fn admin_remove_from_shift(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::run_migrations;
-    use crate::models::User;
-    use sqlx::sqlite::SqlitePoolOptions;
-    use webauthn_rs::prelude::*;
-
-    async fn test_state() -> AppState {
-        let db = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .expect("connect in-memory sqlite");
-        run_migrations(&db).await;
-
-        let rp_origin = Url::parse("http://localhost").unwrap();
-        let webauthn = WebauthnBuilder::new("localhost", &rp_origin)
-            .unwrap()
-            .build()
-            .unwrap();
-
-        AppState {
-            db,
-            webauthn,
-            jwt_secret: vec![0u8; 32],
-            email_service: None,
-            public_url: "http://localhost".to_string(),
-        }
-    }
-
-    async fn insert_user(db: &sqlx::SqlitePool, user: &User) {
-        sqlx::query(
-            "INSERT INTO users (id, display_name, passkey_credential, is_committee, is_admin,
-             code_of_conduct_signed, food_safety_completed, induction_completed, has_contract,
-             contract_expiry_date, created_at, supervised_shift_completed)
-             VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?)"
-        )
-        .bind(&user.id)
-        .bind(&user.display_name)
-        .bind(user.is_committee)
-        .bind(user.is_admin)
-        .bind(user.code_of_conduct_signed)
-        .bind(user.food_safety_completed)
-        .bind(user.induction_completed)
-        .bind(user.has_contract)
-        .bind(&user.created_at)
-        .bind(user.supervised_shift_completed)
-        .execute(db)
-        .await
-        .expect("insert user");
-    }
-
-    fn user_with(induction: bool, coc: bool, food: bool, supervised: bool) -> User {
-        let mut u = User::new(Some("Test".into()), None, false, false);
-        u.induction_completed = induction;
-        u.code_of_conduct_signed = coc;
-        u.food_safety_completed = food;
-        u.supervised_shift_completed = supervised;
-        u
-    }
+    use crate::test_util::{insert_user, test_state, user_with};
 
     #[tokio::test]
     async fn signup_blocked_when_food_safety_missing() {

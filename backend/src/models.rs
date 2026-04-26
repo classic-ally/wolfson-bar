@@ -28,7 +28,7 @@ pub struct ErrorResponse {
 }
 
 // Database models
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct User {
     pub id: String,
     pub display_name: Option<String>,
