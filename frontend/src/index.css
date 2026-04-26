@@ -68,9 +68,10 @@ body {
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
   /* Wolfson brand palette overrides (was: grayscale defaults from shadcn Nova preset).
-     Primary = #28a745 (existing green CTA). Destructive = #dc3545 (existing red).
-     Accent = #002147 (wolfson navy, used in modal headings). */
-  --primary: oklch(0.61 0.18 145);
+     Primary = darker emerald to satisfy WCAG AA contrast (4.5:1) against white.
+     The original #28a745 only hits 3:1; OKLCH L≈0.45 keeps the same green hue
+     while passing AA. Destructive = #dc3545. Accent = #002147 (wolfson navy). */
+  --primary: oklch(0.48 0.16 145);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
@@ -78,7 +79,7 @@ body {
   --muted-foreground: oklch(0.556 0 0);
   --accent: oklch(0.21 0.08 250);
   --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.58 0.22 25);
+  --destructive: oklch(0.5 0.2 25);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);

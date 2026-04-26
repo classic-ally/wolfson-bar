@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef } from 'react'
-import { getAllUsers, promoteUser, demoteUser, deleteUser, markCoC, markInduction, markSupervisedShift, adminUploadCertificate, adminSetContract, adminClearContract, adminSetEmail, getUserId } from '../../lib/auth'
+import { getAllUsers, promoteUser, demoteUser, deleteUser, markCoC, markInduction, markSupervisedShift, adminUploadCertificate, adminSetEmail, getUserId } from '../../lib/auth'
 import type { UserListItem } from '../../types/UserListItem'
 import { usePageTitle } from '../../hooks/usePageTitle'
+import ContractModal from './ContractModal'
 
 function ActionsDropdown({ user, currentUserId, isLastAdmin, actionInProgress, onAction }: {
   user: UserListItem
@@ -103,135 +104,6 @@ function ActionsDropdown({ user, currentUserId, isLastAdmin, actionInProgress, o
           ))}
         </div>
       )}
-    </div>
-  )
-}
-
-function ContractModal({ userId, userName, onClose, onSave }: {
-  userId: string
-  userName: string
-  onClose: () => void
-  onSave: () => void
-}) {
-  const [date, setDate] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  const handleSave = async () => {
-    if (!date) { alert('Please select a date'); return }
-    setSaving(true)
-    try {
-      await adminSetContract(userId, date)
-      onSave()
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to set contract')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleClear = async () => {
-    if (!confirm('Remove this user\'s contract? They will no longer be able to sign up for contract-required shifts.')) return
-    setSaving(true)
-    try {
-      await adminClearContract(userId)
-      onSave()
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to clear contract')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div style={{
-      position: 'fixed',
-      top: 0, left: 0, right: 0, bottom: 0,
-      backgroundColor: 'rgba(0,0,0,0.5)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000,
-    }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
-    >
-      <div style={{
-        backgroundColor: 'white',
-        borderRadius: '8px',
-        padding: '24px',
-        maxWidth: '400px',
-        width: '90%',
-        boxShadow: '0 8px 30px rgba(0,0,0,0.2)',
-      }}>
-        <h3 style={{ marginTop: 0, marginBottom: '8px' }}>Manage Contract</h3>
-        <p style={{ color: '#666', fontSize: '14px', marginBottom: '20px' }}>
-          {userName || 'Unknown user'}
-        </p>
-
-        <label style={{ display: 'block', fontSize: '14px', fontWeight: 500, marginBottom: '6px' }}>
-          Contract Expiry Date
-        </label>
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          style={{
-            width: '100%',
-            padding: '8px',
-            border: '1px solid #ddd',
-            borderRadius: '4px',
-            fontSize: '14px',
-            boxSizing: 'border-box',
-            marginBottom: '20px',
-          }}
-        />
-
-        <div style={{ display: 'flex', gap: '10px', justifyContent: 'space-between' }}>
-          <button
-            onClick={handleClear}
-            disabled={saving}
-            style={{
-              padding: '8px 16px',
-              backgroundColor: '#dc3545',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: saving ? 'not-allowed' : 'pointer',
-              opacity: saving ? 0.7 : 1,
-            }}
-          >
-            Remove Contract
-          </button>
-          <div style={{ display: 'flex', gap: '10px' }}>
-          <button
-            onClick={onClose}
-            style={{
-              padding: '8px 16px',
-              backgroundColor: '#6c757d',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving || !date}
-            style={{
-              padding: '8px 16px',
-              backgroundColor: saving || !date ? '#ccc' : '#28a745',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: saving || !date ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {saving ? 'Saving...' : 'Set Contract'}
-          </button>
-          </div>
-        </div>
-      </div>
     </div>
   )
 }
@@ -508,17 +380,18 @@ export default function AdminUsers() {
         Total: {users.length} users ({adminCount} admins, {users.filter(u => u.is_committee && !u.is_admin).length} committee, {users.filter(u => !u.is_committee && !u.is_admin).length} regular)
       </div>
 
-      {contractModal && (
-        <ContractModal
-          userId={contractModal.userId}
-          userName={contractModal.userName}
-          onClose={() => setContractModal(null)}
-          onSave={() => {
-            setContractModal(null)
-            loadUsers()
-          }}
-        />
-      )}
+      <ContractModal
+        userId={contractModal?.userId ?? ''}
+        userName={contractModal?.userName ?? ''}
+        open={contractModal !== null}
+        onOpenChange={(open) => {
+          if (!open) setContractModal(null)
+        }}
+        onSaved={() => {
+          setContractModal(null)
+          loadUsers()
+        }}
+      />
     </div>
   )
 }

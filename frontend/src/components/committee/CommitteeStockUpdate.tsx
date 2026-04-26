@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { getProducts, Product, createStockTransactions, StockTransaction, lookupBarcode, addBarcode, createProduct } from '../../lib/auth'
 import { usePageTitle } from '../../hooks/usePageTitle'
 import QRScanner from '../QRScanner'
+import NewProductModal from './NewProductModal'
 
 interface TransactionRow {
   id: string
@@ -32,10 +33,6 @@ export default function CommitteeStockUpdate() {
   const [showNewProductModal, setShowNewProductModal] = useState(false)
   const [targetRowId, setTargetRowId] = useState<string | null>(null)
   const [scannedBarcode, setScannedBarcode] = useState<string | null>(null)
-  const [selectedLinkProductId, setSelectedLinkProductId] = useState<number | null>(null)
-  const [newProductPosId, setNewProductPosId] = useState<number | null>(null)
-  const [newProductName, setNewProductName] = useState('')
-  const [newProductCategory, setNewProductCategory] = useState('')
 
   const [rows, setRows] = useState<TransactionRow[]>([
     {
@@ -254,22 +251,22 @@ export default function CommitteeStockUpdate() {
     }
   }
 
-  const handleLinkExistingProduct = async () => {
-    if (!scannedBarcode || !targetRowId || !selectedLinkProductId) return
+  const handleLinkExistingProduct = async (productId: number) => {
+    if (!scannedBarcode || !targetRowId) return
 
     // Check if this product is already used in another row
-    const alreadyUsed = rows.some(row => row.id !== targetRowId && row.product_id === selectedLinkProductId)
+    const alreadyUsed = rows.some(row => row.id !== targetRowId && row.product_id === productId)
     if (alreadyUsed) {
-      const product = products.find(p => p.id === selectedLinkProductId)
+      const product = products.find(p => p.id === productId)
       alert(`"${product?.name}" is already selected in another row. Each product can only appear once per transaction.`)
       setProcessingScan(false)
       return
     }
 
     try {
-      await addBarcode(selectedLinkProductId, scannedBarcode)
+      await addBarcode(productId, scannedBarcode)
 
-      const product = products.find(p => p.id === selectedLinkProductId)
+      const product = products.find(p => p.id === productId)
       if (product) {
         updateRow(targetRowId, {
           product_id: product.id,
@@ -279,11 +276,7 @@ export default function CommitteeStockUpdate() {
         })
       }
 
-      setShowNewProductModal(false)
-      setTargetRowId(null)
-      setScannedBarcode(null)
-      setSelectedLinkProductId(null)
-      setProcessingScan(false)
+      handleCloseNewProductModal()
       alert('Barcode linked successfully!')
     } catch (err) {
       console.error('Failed to link barcode:', err)
@@ -292,48 +285,24 @@ export default function CommitteeStockUpdate() {
     }
   }
 
-  const handleCreateNewProduct = async () => {
-    if (!scannedBarcode || !targetRowId || !newProductPosId || !newProductName || !newProductCategory) {
-      alert('Please fill in all fields.')
-      return
-    }
+  const handleCreateNewProduct = async ({ posId, name, category }: { posId: number; name: string; category: string }) => {
+    if (!scannedBarcode || !targetRowId) return
 
     try {
-      // Create the product
-      const newProduct = await createProduct(newProductPosId, {
-        name: newProductName,
-        category: newProductCategory
-      })
-
-      // Link the barcode
+      const newProduct = await createProduct(posId, { name, category })
       await addBarcode(newProduct.id, scannedBarcode)
 
-      // Add new product to products list (avoid full reload which causes state issues)
-      const newProductWithStock = {
-        ...newProduct,
-        current_stock: 0,
-        last_unit_cost: null
-      }
+      const newProductWithStock = { ...newProduct, current_stock: 0, last_unit_cost: null }
       setProducts([...products, newProductWithStock])
 
-      // Auto-fill the row
       updateRow(targetRowId, {
         product_id: newProduct.id,
         product_name: newProduct.name,
-        current_stock: 0,  // New product starts with 0 stock
+        current_stock: 0,
         unit_cost: null
       })
 
-      // Close modal and reset
-      setShowNewProductModal(false)
-      setTargetRowId(null)
-      setScannedBarcode(null)
-      setSelectedLinkProductId(null)
-      setNewProductPosId(null)
-      setNewProductName('')
-      setNewProductCategory('')
-      setProcessingScan(false)
-
+      handleCloseNewProductModal()
       alert('Product created and barcode linked successfully!')
     } catch (err: any) {
       console.error('Failed to create product:', err)
@@ -346,10 +315,6 @@ export default function CommitteeStockUpdate() {
     setShowNewProductModal(false)
     setTargetRowId(null)
     setScannedBarcode(null)
-    setSelectedLinkProductId(null)
-    setNewProductPosId(null)
-    setNewProductName('')
-    setNewProductCategory('')
     setProcessingScan(false)
   }
 
@@ -678,182 +643,16 @@ export default function CommitteeStockUpdate() {
         />
       )}
 
-      {/* New Product Modal */}
-      {showNewProductModal && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000
-          }}
-        >
-          <div
-            style={{
-              backgroundColor: 'white',
-              borderRadius: '8px',
-              padding: '30px',
-              maxWidth: '500px',
-              width: '90%',
-              maxHeight: '90vh',
-              overflow: 'auto'
-            }}
-          >
-            <h2 style={{ marginTop: 0 }}>Barcode Not Found</h2>
-            <p style={{ color: '#666', marginBottom: '20px' }}>
-              Barcode <strong>{scannedBarcode}</strong> is not linked to any product.
-              Choose an option below:
-            </p>
-
-            <div style={{ marginBottom: '30px' }}>
-              <h3 style={{ fontSize: '16px', marginBottom: '10px' }}>Link to Existing Product</h3>
-              <select
-                value={selectedLinkProductId || ''}
-                onChange={(e) => setSelectedLinkProductId(e.target.value ? parseInt(e.target.value) : null)}
-                style={{
-                  width: '100%',
-                  padding: '8px',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  fontSize: '14px',
-                  marginBottom: '10px'
-                }}
-              >
-                <option value="">Select a product...</option>
-                {(() => {
-                  const availableProducts = targetRowId ? getAvailableProducts(targetRowId) : products
-                  return availableProducts.map(product => (
-                    <option key={product.id} value={product.id}>
-                      [{product.id}] {product.name}
-                    </option>
-                  ))
-                })()}
-              </select>
-
-              {selectedLinkProductId && (
-                <button
-                  onClick={handleLinkExistingProduct}
-                  style={{
-                    width: '100%',
-                    padding: '10px',
-                    backgroundColor: '#007bff',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                    fontWeight: 500
-                  }}
-                >
-                  Link Barcode to Selected Product
-                </button>
-              )}
-            </div>
-
-            {!selectedLinkProductId && (
-              <div style={{ borderTop: '1px solid #ddd', paddingTop: '20px', marginBottom: '20px' }}>
-              <h3 style={{ fontSize: '16px', marginBottom: '15px' }}>Or Create New Product</h3>
-
-              <div style={{ marginBottom: '15px' }}>
-                <label style={{ display: 'block', fontWeight: 500, marginBottom: '5px' }}>
-                  PoS ID *
-                </label>
-                <input
-                  type="number"
-                  value={newProductPosId || ''}
-                  onChange={(e) => setNewProductPosId(parseInt(e.target.value) || null)}
-                  placeholder="e.g., 42"
-                  style={{
-                    width: '100%',
-                    padding: '8px',
-                    border: '1px solid #ddd',
-                    borderRadius: '4px',
-                    fontSize: '14px'
-                  }}
-                />
-              </div>
-
-              <div style={{ marginBottom: '15px' }}>
-                <label style={{ display: 'block', fontWeight: 500, marginBottom: '5px' }}>
-                  Product Name *
-                </label>
-                <input
-                  type="text"
-                  value={newProductName}
-                  onChange={(e) => setNewProductName(e.target.value)}
-                  placeholder="e.g., Coca-Cola 330ml Can"
-                  style={{
-                    width: '100%',
-                    padding: '8px',
-                    border: '1px solid #ddd',
-                    borderRadius: '4px',
-                    fontSize: '14px'
-                  }}
-                />
-              </div>
-
-              <div style={{ marginBottom: '15px' }}>
-                <label style={{ display: 'block', fontWeight: 500, marginBottom: '5px' }}>
-                  Category *
-                </label>
-                <input
-                  type="text"
-                  value={newProductCategory}
-                  onChange={(e) => setNewProductCategory(e.target.value)}
-                  placeholder="e.g., soft_drinks"
-                  style={{
-                    width: '100%',
-                    padding: '8px',
-                    border: '1px solid #ddd',
-                    borderRadius: '4px',
-                    fontSize: '14px'
-                  }}
-                />
-              </div>
-
-              <button
-                onClick={handleCreateNewProduct}
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  backgroundColor: '#28a745',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  fontWeight: 500
-                }}
-              >
-                Create Product &amp; Link Barcode
-              </button>
-            </div>
-            )}
-
-            <button
-              onClick={handleCloseNewProductModal}
-              style={{
-                width: '100%',
-                padding: '10px',
-                backgroundColor: '#6c757d',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px'
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
+      <NewProductModal
+        open={showNewProductModal}
+        onOpenChange={(open) => {
+          if (!open) handleCloseNewProductModal()
+        }}
+        scannedBarcode={scannedBarcode ?? ''}
+        availableProducts={targetRowId ? getAvailableProducts(targetRowId) : products}
+        onLink={handleLinkExistingProduct}
+        onCreate={handleCreateNewProduct}
+      />
     </div>
   )
 }

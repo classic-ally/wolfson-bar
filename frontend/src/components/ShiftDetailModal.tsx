@@ -5,6 +5,22 @@ import type { UserStatus } from '../types/UserStatus'
 import type { ActiveMember } from '../types/ActiveMember'
 import type { Event } from '../types/Event'
 import type { InductionDateInductee } from '../types/InductionDateInductee'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from '@/components/ui/combobox'
 
 interface ShiftDetailModalProps {
   shift: ShiftInfo | null
@@ -183,39 +199,13 @@ export default function ShiftDetailModal({ shift, event, userStatus, isCommittee
   const inductionAvailable = shift.has_induction_availability && shift.induction_signups_count < 4
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 1000,
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          backgroundColor: 'white',
-          padding: '30px',
-          borderRadius: '8px',
-          maxWidth: '500px',
-          width: '90%',
-          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-          maxHeight: '90vh',
-          overflowY: 'auto',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 style={{ marginTop: 0, color: '#002147' }}>
-          Shift Details
-        </h2>
+    <Dialog open={true} onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-auto">
+        <DialogHeader>
+          <DialogTitle className="text-[#002147]">Shift Details</DialogTitle>
+        </DialogHeader>
 
-        <div style={{ marginBottom: '20px' }}>
+        <div>
           <p style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '5px' }}>
             {formatDate(shift.date)}
           </p>
@@ -246,13 +236,13 @@ export default function ShiftDetailModal({ shift, event, userStatus, isCommittee
           )}
         </div>
 
-        <div style={{ marginBottom: '20px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '4px' }}>
+        <div style={{ padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '4px' }}>
           <div style={{ marginBottom: '8px' }}>
             <strong>Volunteers needed:</strong> {shift.max_volunteers}
           </div>
           <div style={{ marginBottom: '8px' }}>
             <strong>Currently signed up:</strong> {shift.signups_count}
-            {isFull && <span style={{ color: '#28a745', marginLeft: '10px', fontWeight: 'bold' }}>✓ Full</span>}
+            {isFull && <span className="ml-2.5 font-bold text-primary">✓ Full</span>}
           </div>
           {shift.requires_contract && (
             <div style={{ color: '#856404', backgroundColor: '#fff3cd', padding: '8px', borderRadius: '4px', marginTop: '8px' }}>
@@ -273,7 +263,7 @@ export default function ShiftDetailModal({ shift, event, userStatus, isCommittee
 
         {/* Signup list - hidden for pre-induction users since API returns empty */}
         {!needsInduction && shift.signups.length > 0 && (
-          <div style={{ marginBottom: '20px' }}>
+          <div>
             <strong>Signed up:</strong>
             <ul style={{ margin: '8px 0', paddingLeft: '20px' }}>
               {shift.signups.map((signup) => (
@@ -285,23 +275,15 @@ export default function ShiftDetailModal({ shift, event, userStatus, isCommittee
                     )}
                   </span>
                   {isCommittee && (
-                    <button
+                    <Button
+                      variant="destructive"
+                      size="xs"
                       onClick={() => handleRemove(signup.user_id)}
                       disabled={removeLoading === signup.user_id}
-                      style={{
-                        padding: '2px 8px',
-                        backgroundColor: '#dc3545',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '3px',
-                        fontSize: '12px',
-                        cursor: removeLoading === signup.user_id ? 'not-allowed' : 'pointer',
-                        opacity: removeLoading === signup.user_id ? 0.6 : 1,
-                        marginLeft: '8px',
-                      }}
+                      className="ml-2"
                     >
-                      {removeLoading === signup.user_id ? '...' : 'Remove'}
-                    </button>
+                      {removeLoading === signup.user_id ? '…' : 'Remove'}
+                    </Button>
                   )}
                 </li>
               ))}
@@ -311,7 +293,7 @@ export default function ShiftDetailModal({ shift, event, userStatus, isCommittee
 
         {/* Committee: Induction availability */}
         {isCommittee && shift && (
-          <div style={{ marginBottom: '20px', padding: '15px', backgroundColor: '#e8f4fd', borderRadius: '4px', border: '1px solid #b8daff' }}>
+          <div style={{ padding: '15px', backgroundColor: '#e8f4fd', borderRadius: '4px', border: '1px solid #b8daff' }}>
             <strong style={{ display: 'block', marginBottom: '4px' }}>Your Induction Availability</strong>
             <p style={{ color: '#666', fontSize: '13px', margin: '0 0 10px 0' }}>
               Mark yourself as available to run an induction on this date (7:45–8:30). This is separate from signing up for the shift.
@@ -326,21 +308,13 @@ export default function ShiftDetailModal({ shift, event, userStatus, isCommittee
                 I can run an induction on this date
               </label>
               {inductionAvailChecked !== shift.current_user_induction_available && (
-                <button
+                <Button
+                  size="sm"
                   onClick={() => handleInductionAvailToggle(inductionAvailChecked)}
                   disabled={inductionLoading}
-                  style={{
-                    padding: '4px 12px',
-                    backgroundColor: inductionLoading ? '#ccc' : '#0d6efd',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: inductionLoading ? 'not-allowed' : 'pointer',
-                    fontSize: '13px',
-                  }}
                 >
-                  {inductionLoading ? 'Saving...' : 'Save'}
-                </button>
+                  {inductionLoading ? 'Saving…' : 'Save'}
+                </Button>
               )}
               {inductionAvailChecked === shift.current_user_induction_available && shift.current_user_induction_available && (
                 <span style={{ color: '#28a745', fontSize: '13px' }}>Saved ✓</span>
@@ -369,50 +343,50 @@ export default function ShiftDetailModal({ shift, event, userStatus, isCommittee
 
         {/* Committee: Assign member */}
         {isCommittee && shift && (
-          <div style={{ marginBottom: '20px', padding: '15px', backgroundColor: '#fff3cd', borderRadius: '4px', border: '1px solid #ffc107' }}>
+          <div style={{ padding: '15px', backgroundColor: '#fff3cd', borderRadius: '4px', border: '1px solid #ffc107' }}>
             <strong style={{ display: 'block', marginBottom: '8px' }}>Assign Member to Shift</strong>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <select
-                value={selectedUserId}
-                onChange={(e) => setSelectedUserId(e.target.value)}
-                style={{
-                  flex: 1,
-                  padding: '8px',
-                  borderRadius: '4px',
-                  border: '1px solid #ccc',
-                }}
-              >
-                <option value="">Select a member...</option>
-                {activeMembers
-                  .filter(m => !shift.signups.some(s => s.user_id === m.user_id))
-                  .map(m => (
-                    <option
-                      key={m.user_id}
-                      value={m.user_id}
-                      disabled={shift.requires_contract && !m.has_contract}
+            {(() => {
+              const items = activeMembers
+                .filter(m => !shift.signups.some(s => s.user_id === m.user_id))
+                .map(m => ({
+                  value: m.user_id,
+                  label: (m.display_name || m.user_id) + (shift.requires_contract && !m.has_contract ? ' (no contract)' : ''),
+                  disabled: shift.requires_contract && !m.has_contract,
+                }))
+              const selectedItem = items.find(i => i.value === selectedUserId) ?? null
+              return (
+                <div className="flex items-center gap-2">
+                  <div className="flex-1">
+                    <Combobox
+                      items={items}
+                      value={selectedItem}
+                      onValueChange={(item: typeof items[number] | null) =>
+                        setSelectedUserId(item?.value ?? '')
+                      }
+                      itemToStringValue={(item: typeof items[number]) => item.label}
                     >
-                      {m.display_name || m.user_id}
-                      {shift.requires_contract && !m.has_contract ? ' (no contract)' : ''}
-                    </option>
-                  ))}
-              </select>
-              <button
-                onClick={handleAssign}
-                disabled={!selectedUserId || assignLoading || isFull}
-                style={{
-                  padding: '8px 16px',
-                  backgroundColor: '#002147',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: !selectedUserId || assignLoading || isFull ? 'not-allowed' : 'pointer',
-                  opacity: !selectedUserId || assignLoading || isFull ? 0.6 : 1,
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {assignLoading ? 'Assigning...' : 'Assign'}
-              </button>
-            </div>
+                      <ComboboxInput placeholder="Select a member..." />
+                      <ComboboxContent>
+                        <ComboboxEmpty>No members found.</ComboboxEmpty>
+                        <ComboboxList>
+                          {(item: typeof items[number]) => (
+                            <ComboboxItem key={item.value} value={item} disabled={item.disabled}>
+                              {item.label}
+                            </ComboboxItem>
+                          )}
+                        </ComboboxList>
+                      </ComboboxContent>
+                    </Combobox>
+                  </div>
+                  <Button
+                    onClick={handleAssign}
+                    disabled={!selectedUserId || assignLoading || isFull}
+                  >
+                    {assignLoading ? 'Assigning…' : 'Assign'}
+                  </Button>
+                </div>
+              )
+            })()}
           </div>
         )}
 
@@ -422,7 +396,6 @@ export default function ShiftDetailModal({ shift, event, userStatus, isCommittee
             color: '#721c24',
             padding: '12px',
             borderRadius: '4px',
-            marginBottom: '20px',
           }}>
             {error}
           </div>
@@ -430,7 +403,7 @@ export default function ShiftDetailModal({ shift, event, userStatus, isCommittee
 
         {/* Pre-induction user section */}
         {needsInduction && !isCommittee && (
-          <div style={{ marginBottom: '20px', padding: '15px', backgroundColor: '#e8f4fd', borderRadius: '4px', border: '1px solid #b8daff' }}>
+          <div style={{ padding: '15px', backgroundColor: '#e8f4fd', borderRadius: '4px', border: '1px solid #b8daff' }}>
             {userInductionSignedUp ? (
               <div>
                 <div style={{
@@ -447,7 +420,9 @@ export default function ShiftDetailModal({ shift, event, userStatus, isCommittee
                     Induction: 7:45–8:30{userInductionFullShift ? ' + supervised shift (full evening)' : ''}
                   </p>
                 </div>
-                <button
+                <Button
+                  variant="destructive"
+                  size="sm"
                   onClick={async () => {
                     setInductionLoading(true)
                     try {
@@ -462,19 +437,9 @@ export default function ShiftDetailModal({ shift, event, userStatus, isCommittee
                     }
                   }}
                   disabled={inductionLoading}
-                  style={{
-                    padding: '8px 16px',
-                    backgroundColor: '#dc3545',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: inductionLoading ? 'not-allowed' : 'pointer',
-                    opacity: inductionLoading ? 0.6 : 1,
-                    fontSize: '13px',
-                  }}
                 >
-                  {inductionLoading ? 'Cancelling...' : 'Cancel Induction Signup'}
-                </button>
+                  {inductionLoading ? 'Cancelling…' : 'Cancel Induction Signup'}
+                </Button>
               </div>
             ) : (
               <>
@@ -513,22 +478,13 @@ export default function ShiftDetailModal({ shift, event, userStatus, isCommittee
                         )}
                       </span>
                     </label>
-                    <button
+                    <Button
                       onClick={handleInductionSignup}
                       disabled={inductionLoading}
-                      style={{
-                        padding: '10px 20px',
-                        backgroundColor: '#28a745',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '4px',
-                        cursor: inductionLoading ? 'not-allowed' : 'pointer',
-                        opacity: inductionLoading ? 0.6 : 1,
-                        width: '100%',
-                      }}
+                      className="w-full"
                     >
-                      {inductionLoading ? 'Signing up...' : 'Sign Up for Induction'}
-                    </button>
+                      {inductionLoading ? 'Signing up…' : 'Sign Up for Induction'}
+                    </Button>
                   </div>
                 ) : (
                   <p style={{ color: '#666', fontSize: '14px', margin: 0 }}>
@@ -540,106 +496,38 @@ export default function ShiftDetailModal({ shift, event, userStatus, isCommittee
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-          <button
-            onClick={onClose}
-            style={{
-              padding: '10px 20px',
-              backgroundColor: '#6c757d',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-            }}
-          >
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
             Close
-          </button>
+          </Button>
 
-          {/* Post-induction users: show regular signup/cancel or status buttons */}
           {!needsInduction && (
             <>
               {isSignedUp ? (
-                <button
-                  onClick={handleCancel}
-                  disabled={loading}
-                  style={{
-                    padding: '10px 20px',
-                    backgroundColor: '#dc3545',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: loading ? 'not-allowed' : 'pointer',
-                    opacity: loading ? 0.6 : 1,
-                  }}
-                >
-                  {loading ? 'Cancelling...' : 'Cancel Signup'}
-                </button>
+                <Button variant="destructive" onClick={handleCancel} disabled={loading}>
+                  {loading ? 'Cancelling…' : 'Cancel Signup'}
+                </Button>
               ) : canSignup ? (
-                <button
-                  onClick={handleSignup}
-                  disabled={loading}
-                  style={{
-                    padding: '10px 20px',
-                    backgroundColor: '#28a745',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: loading ? 'not-allowed' : 'pointer',
-                    opacity: loading ? 0.6 : 1,
-                  }}
-                >
-                  {loading ? 'Signing up...' : 'Sign Up'}
-                </button>
+                <Button onClick={handleSignup} disabled={loading}>
+                  {loading ? 'Signing up…' : 'Sign Up'}
+                </Button>
               ) : needsSupervision ? (
-                <button
-                  disabled
-                  style={{
-                    padding: '10px 20px',
-                    backgroundColor: '#6c757d',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'not-allowed',
-                    opacity: 0.6,
-                  }}
-                >
+                <Button variant="secondary" disabled>
                   Supervised Shift Required
-                </button>
+                </Button>
               ) : lacksContract ? (
-                <button
-                  disabled
-                  style={{
-                    padding: '10px 20px',
-                    backgroundColor: '#6c757d',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'not-allowed',
-                    opacity: 0.6,
-                  }}
-                >
+                <Button variant="secondary" disabled>
                   Contract Required
-                </button>
+                </Button>
               ) : isFull ? (
-                <button
-                  disabled
-                  style={{
-                    padding: '10px 20px',
-                    backgroundColor: '#6c757d',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'not-allowed',
-                    opacity: 0.6,
-                  }}
-                >
+                <Button variant="secondary" disabled>
                   Shift Full
-                </button>
+                </Button>
               ) : null}
             </>
           )}
-        </div>
-      </div>
-    </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

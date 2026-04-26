@@ -492,14 +492,15 @@ export default function CommitteePage() {
         )}
       </section>
 
-      {selectedCert && (
-        <CertificateModal
-          userId={selectedCert.user_id}
-          displayName={selectedCert.display_name}
-          onApprove={handleApprove}
-          onClose={() => setSelectedCert(null)}
-        />
-      )}
+      <CertificateModal
+        userId={selectedCert?.user_id ?? ''}
+        displayName={selectedCert?.display_name ?? null}
+        open={selectedCert !== null}
+        onOpenChange={(open) => {
+          if (!open) setSelectedCert(null)
+        }}
+        onApprove={handleApprove}
+      />
 
       {showScanner && (
         <QRScanner
