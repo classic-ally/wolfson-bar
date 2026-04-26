@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getUserStatus, UserStatus, acceptCodeOfConduct, uploadCertificate, updateDisplayName, submitContractRequest, acceptPrivacy, startPasskeySetup, getInductionDates, signupForInduction, cancelInductionSignup, InductionDate } from '../lib/auth'
+import { getUserStatus, UserStatus, acceptCodeOfConduct, uploadCertificate, updateDisplayName, submitContractRequest, acceptPrivacy, startPasskeySetup, getInductionDates, signupForInduction, cancelInductionSignup, InductionDate, canSignupForShifts, isRotaMember } from '../lib/auth'
 import CodeOfConduct from './CodeOfConduct'
 
 export default function OnboardingPage() {
@@ -212,11 +212,7 @@ export default function OnboardingPage() {
     return <CodeOfConduct onAccept={handleCocAccept} onDecline={handleCocDecline} />
   }
 
-  const isFullyOnboarded =
-    status.code_of_conduct_signed &&
-    status.food_safety_completed &&
-    status.induction_completed &&
-    status.supervised_shift_completed
+  const isFullyOnboarded = isRotaMember(status)
 
   const formatInductionDate = (dateStr: string) => {
     const date = new Date(dateStr + 'T00:00:00')
@@ -625,7 +621,7 @@ export default function OnboardingPage() {
               Tip: When signing up for induction above, select "Also do supervised shift" if a committee member is available for the full evening.
             </p>
           )}
-          {!status.supervised_shift_completed && status.induction_completed && status.code_of_conduct_signed && status.food_safety_completed && (
+          {!status.supervised_shift_completed && canSignupForShifts(status) && (
             <p style={{ color: '#888', fontSize: '13px', margin: 0 }}>
               Check the calendar for shifts where a committee member is signed up.
             </p>

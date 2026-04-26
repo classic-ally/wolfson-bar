@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getUserStatus, UserStatus, acceptCodeOfConduct, uploadCertificate, getInductionDates, signupForInduction, cancelInductionSignup, InductionDate } from '../../lib/auth'
+import { getUserStatus, UserStatus, acceptCodeOfConduct, uploadCertificate, getInductionDates, signupForInduction, cancelInductionSignup, InductionDate, canSignupForShifts, isRotaMember } from '../../lib/auth'
 import { usePageTitle } from '../../hooks/usePageTitle'
 import CodeOfConduct from '../CodeOfConduct'
 
@@ -144,11 +144,7 @@ export default function UserInduction() {
     return <CodeOfConduct onAccept={handleCocAccept} onDecline={handleCocDecline} />
   }
 
-  const isFullyOnboarded =
-    status.induction_completed &&
-    status.code_of_conduct_signed &&
-    status.food_safety_completed &&
-    status.supervised_shift_completed
+  const isFullyOnboarded = isRotaMember(status)
 
   return (
     <div>
@@ -396,7 +392,7 @@ export default function UserInduction() {
               Tip: When signing up for induction, select "Also do supervised shift" if a committee member is available for the full evening.
             </p>
           )}
-          {!status.supervised_shift_completed && status.induction_completed && status.code_of_conduct_signed && status.food_safety_completed && (
+          {!status.supervised_shift_completed && canSignupForShifts(status) && (
             <p style={{ color: '#888', fontSize: '13px', margin: 0 }}>
               Check the calendar for shifts where a committee member is signed up.
             </p>

@@ -306,8 +306,7 @@ pub async fn signup_for_shift(
             )
         })?;
 
-    // Must have completed induction, CoC, and food safety before signing up for shifts
-    if !user.induction_completed || !user.code_of_conduct_signed || !user.food_safety_completed {
+    if !user.can_signup_for_shifts() {
         return Err((
             StatusCode::FORBIDDEN,
             Json(ErrorResponse {
@@ -740,4 +739,132 @@ pub async fn admin_remove_from_shift(
 
     info!("✅ Committee member {} removed user {} from shift on {}", committee_user.id, target_user_id, date);
     Ok(StatusCode::OK)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::run_migrations;
+    use crate::models::User;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use webauthn_rs::prelude::*;
+
+    async fn test_state() -> AppState {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("connect in-memory sqlite");
+        run_migrations(&db).await;
+
+        let rp_origin = Url::parse("http://localhost").unwrap();
+        let webauthn = WebauthnBuilder::new("localhost", &rp_origin)
+            .unwrap()
+            .build()
+            .unwrap();
+
+        AppState {
+            db,
+            webauthn,
+            jwt_secret: vec![0u8; 32],
+            email_service: None,
+            public_url: "http://localhost".to_string(),
+        }
+    }
+
+    async fn insert_user(db: &sqlx::SqlitePool, user: &User) {
+        sqlx::query(
+            "INSERT INTO users (id, display_name, passkey_credential, is_committee, is_admin,
+             code_of_conduct_signed, food_safety_completed, induction_completed, has_contract,
+             contract_expiry_date, created_at, supervised_shift_completed)
+             VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?)"
+        )
+        .bind(&user.id)
+        .bind(&user.display_name)
+        .bind(user.is_committee)
+        .bind(user.is_admin)
+        .bind(user.code_of_conduct_signed)
+        .bind(user.food_safety_completed)
+        .bind(user.induction_completed)
+        .bind(user.has_contract)
+        .bind(&user.created_at)
+        .bind(user.supervised_shift_completed)
+        .execute(db)
+        .await
+        .expect("insert user");
+    }
+
+    fn user_with(induction: bool, coc: bool, food: bool, supervised: bool) -> User {
+        let mut u = User::new(Some("Test".into()), None, false, false);
+        u.induction_completed = induction;
+        u.code_of_conduct_signed = coc;
+        u.food_safety_completed = food;
+        u.supervised_shift_completed = supervised;
+        u
+    }
+
+    #[tokio::test]
+    async fn signup_blocked_when_food_safety_missing() {
+        let state = test_state().await;
+        let user = user_with(true, true, false, false);
+        insert_user(&state.db, &user).await;
+
+        let result = signup_for_shift(
+            State(state),
+            AuthenticatedUser(user),
+            Path("2026-05-01".to_string()),
+        )
+        .await;
+
+        let (status, body) = result.expect_err("expected gate to block");
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(
+            body.error.contains("food safety"),
+            "expected onboarding error, got: {}",
+            body.error
+        );
+    }
+
+    #[tokio::test]
+    async fn signup_blocked_when_induction_missing() {
+        let state = test_state().await;
+        let user = user_with(false, true, true, false);
+        insert_user(&state.db, &user).await;
+
+        let result = signup_for_shift(
+            State(state),
+            AuthenticatedUser(user),
+            Path("2026-05-01".to_string()),
+        )
+        .await;
+
+        let (status, body) = result.expect_err("expected gate to block");
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(body.error.contains("induction"));
+    }
+
+    #[tokio::test]
+    async fn signup_passes_gate_then_blocks_on_supervised_check() {
+        // All three signup flags true, supervised false, no committee on the shift date.
+        // Proves the can_signup_for_shifts gate passes (otherwise we'd see the onboarding
+        // error) and the supervised-shift gate then takes over with its own error.
+        let state = test_state().await;
+        let user = user_with(true, true, true, false);
+        insert_user(&state.db, &user).await;
+
+        let result = signup_for_shift(
+            State(state),
+            AuthenticatedUser(user),
+            Path("2026-05-01".to_string()),
+        )
+        .await;
+
+        let (status, body) = result.expect_err("expected supervised-shift block");
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(
+            body.error.contains("supervised shift"),
+            "expected supervised-shift error (proves first gate let user through), got: {}",
+            body.error
+        );
+    }
 }

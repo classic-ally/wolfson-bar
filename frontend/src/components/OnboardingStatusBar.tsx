@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getUserStatus, isLoggedIn, UserStatus } from '../lib/auth'
+import { getUserStatus, isLoggedIn, UserStatus, isRotaMember, canSignupForShifts } from '../lib/auth'
 
 interface OnboardingStatusBarProps {
   onNavigateToOnboarding: () => void
@@ -23,15 +23,7 @@ export default function OnboardingStatusBar({ onNavigateToOnboarding }: Onboardi
 
   if (loading || !status) return null
 
-  // Check if user has completed everything
-  const isFullyOnboarded =
-    status.code_of_conduct_signed &&
-    status.food_safety_completed &&
-    status.induction_completed &&
-    status.supervised_shift_completed
-
-  // Don't show anything if fully onboarded
-  if (isFullyOnboarded) return null
+  if (isRotaMember(status)) return null
 
   const pendingTasks = []
 
@@ -51,7 +43,7 @@ export default function OnboardingStatusBar({ onNavigateToOnboarding }: Onboardi
     }
   }
 
-  if (!status.supervised_shift_completed && status.induction_completed && status.code_of_conduct_signed && status.food_safety_completed) {
+  if (!status.supervised_shift_completed && canSignupForShifts(status)) {
     pendingTasks.push('Complete Supervised Shift')
   }
 

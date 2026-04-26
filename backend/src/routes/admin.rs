@@ -11,7 +11,7 @@ use tracing::{info, error};
 use ts_rs::TS;
 
 use crate::auth::{CommitteeUser, AdminUser};
-use crate::models::{ErrorResponse, User};
+use crate::models::{ErrorResponse, User, IS_ROTA_MEMBER_SQL};
 use crate::routes::auth::{AppState, create_user_in_db};
 
 #[derive(Debug, Serialize, Deserialize, TS)]
@@ -237,12 +237,10 @@ pub async fn get_active_members(
 
     // Get users who are fully onboarded (active members)
     let active_users = sqlx::query_as::<_, User>(
-        "SELECT * FROM users
-         WHERE code_of_conduct_signed = TRUE
-         AND food_safety_completed = TRUE
-         AND induction_completed = TRUE
-         AND supervised_shift_completed = TRUE
-         ORDER BY display_name ASC"
+        &format!(
+            "SELECT * FROM users WHERE {} ORDER BY display_name ASC",
+            IS_ROTA_MEMBER_SQL
+        )
     )
     .fetch_all(&state.db)
     .await
@@ -455,11 +453,7 @@ pub async fn get_overview_stats(
 ) -> Result<Json<OverviewStats>, (StatusCode, Json<ErrorResponse>)> {
     // Get active members count
     let active_members_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM users
-         WHERE code_of_conduct_signed = TRUE
-         AND food_safety_completed = TRUE
-         AND induction_completed = TRUE
-         AND supervised_shift_completed = TRUE"
+        &format!("SELECT COUNT(*) FROM users WHERE {}", IS_ROTA_MEMBER_SQL)
     )
     .fetch_one(&state.db)
     .await

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { ShiftInfo, signupForShift, cancelShiftSignup, removeUserFromShift, getUserId, UserStatus, ActiveMember, getActiveMembers, assignUserToShift, Event, setInductionAvailability, removeInductionAvailability, signupForInduction, cancelInductionSignup, getInductionDates, InductionDateInductee } from '../lib/auth'
+import { ShiftInfo, signupForShift, cancelShiftSignup, removeUserFromShift, getUserId, UserStatus, ActiveMember, getActiveMembers, assignUserToShift, Event, setInductionAvailability, removeInductionAvailability, signupForInduction, cancelInductionSignup, getInductionDates, InductionDateInductee, canSignupForShifts } from '../lib/auth'
 
 interface ShiftDetailModalProps {
   shift: ShiftInfo | null
@@ -70,11 +70,8 @@ export default function ShiftDetailModal({ shift, event, userStatus, isCommittee
   const needsInduction = !isInducted
   const needsSupervision = isInducted && !isSupervisedComplete && !hasCommitteeMember
 
-  // canSignup requires induction_completed + code_of_conduct_signed + food_safety_completed
-  // If supervised_shift not complete, needs committee member on shift
-  const hasRequiredOnboarding = isInducted
-    && (userStatus?.code_of_conduct_signed ?? false)
-    && (userStatus?.food_safety_completed ?? false)
+  // If supervised_shift not complete, signup is allowed only when a committee member is present.
+  const hasRequiredOnboarding = userStatus ? canSignupForShifts(userStatus) : false
   const supervisedOk = isSupervisedComplete || hasCommitteeMember
   const canSignup = !isSignedUp && !isFull && !lacksContract && hasRequiredOnboarding && supervisedOk
 

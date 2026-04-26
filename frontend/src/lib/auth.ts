@@ -222,6 +222,23 @@ export interface UserStatus {
   supervised_shift_completed: boolean
 }
 
+type RotaPredicateFields = Pick<
+  UserStatus,
+  'induction_completed' | 'code_of_conduct_signed' | 'food_safety_completed' | 'supervised_shift_completed'
+>
+
+// Sign-up gate. Excludes supervised_shift_completed because the supervised
+// shift is itself completed via a booking — gating on it would deadlock new
+// members.
+export function canSignupForShifts(u: RotaPredicateFields): boolean {
+  return u.induction_completed && u.code_of_conduct_signed && u.food_safety_completed
+}
+
+// Full active rota member: eligible for allocation and counted in active rosters.
+export function isRotaMember(u: RotaPredicateFields): boolean {
+  return canSignupForShifts(u) && u.supervised_shift_completed
+}
+
 /**
  * Get current user's status
  */

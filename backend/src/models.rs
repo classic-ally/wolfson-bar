@@ -100,4 +100,57 @@ impl User {
             supervised_shift_completed: false,
         }
     }
+
+    /// Gate for booking shifts. Excludes supervised_shift_completed
+    /// because the supervised shift is itself completed via a booking.
+    pub fn can_signup_for_shifts(&self) -> bool {
+        self.induction_completed
+            && self.code_of_conduct_signed
+            && self.food_safety_completed
+    }
+
+    /// Full active rota member: can be allocated and counted in active rosters.
+    pub fn is_rota_member(&self) -> bool {
+        self.can_signup_for_shifts() && self.supervised_shift_completed
+    }
+}
+
+/// SQL WHERE-clause fragment matching `User::is_rota_member`.
+/// Use as: `format!("SELECT ... FROM users WHERE {}", IS_ROTA_MEMBER_SQL)`.
+pub const IS_ROTA_MEMBER_SQL: &str =
+    "code_of_conduct_signed = TRUE \
+     AND food_safety_completed = TRUE \
+     AND induction_completed = TRUE \
+     AND supervised_shift_completed = TRUE";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn user_with(induction: bool, coc: bool, food: bool, supervised: bool) -> User {
+        let mut u = User::new(None, None, false, false);
+        u.induction_completed = induction;
+        u.code_of_conduct_signed = coc;
+        u.food_safety_completed = food;
+        u.supervised_shift_completed = supervised;
+        u
+    }
+
+    #[test]
+    fn signup_requires_three_completions_excluding_supervised() {
+        assert!(user_with(true, true, true, false).can_signup_for_shifts());
+        assert!(user_with(true, true, true, true).can_signup_for_shifts());
+        assert!(!user_with(false, true, true, false).can_signup_for_shifts());
+        assert!(!user_with(true, false, true, false).can_signup_for_shifts());
+        assert!(!user_with(true, true, false, false).can_signup_for_shifts());
+    }
+
+    #[test]
+    fn rota_member_requires_supervised_on_top_of_signup() {
+        assert!(user_with(true, true, true, true).is_rota_member());
+        assert!(!user_with(true, true, true, false).is_rota_member());
+        assert!(!user_with(false, true, true, true).is_rota_member());
+        assert!(!user_with(true, false, true, true).is_rota_member());
+        assert!(!user_with(true, true, false, true).is_rota_member());
+    }
 }
