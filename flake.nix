@@ -26,13 +26,24 @@
           };
 
           # ts-rs bindings emitted by `cargo test`. Output is the directory
-          # containing all *.ts files for frontend/src/types/.
-          ts-bindings = rustPlatform.buildRustPackage {
+          # containing all *.ts files for frontend/src/types/. We piggyback on
+          # rustPlatform's cargo-deps fetcher (via `cargoDeps`) but skip the
+          # install hooks since we're not producing a binary.
+          ts-bindings = pkgs.stdenv.mkDerivation {
             pname = "wolfson-bar-ts-bindings";
             version = "0.1.0";
             src = ./backend;
-            cargoLock.lockFile = ./backend/Cargo.lock;
-            nativeBuildInputs = [ pkgs.pkg-config ];
+
+            cargoDeps = rustPlatform.fetchCargoVendor {
+              src = ./backend;
+              hash = "sha256-Hjf4XbzkaSVi4zqZZPe6U/bmCHs4cDqn7FBHaKKzU3E=";
+            };
+
+            nativeBuildInputs = [
+              pkgs.rust-bin.stable.latest.default
+              rustPlatform.cargoSetupHook
+              pkgs.pkg-config
+            ];
             buildInputs = [ pkgs.openssl ];
 
             buildPhase = ''
@@ -56,7 +67,7 @@
               version = "0.1.0";
               src = ./frontend;
               fetcherVersion = 3;
-              hash = "sha256-iP8y4dQnASPZyqKUqlV6AVPLCUCNfoecNNUUJLDFQaw=";
+              hash = "sha256-7ANgm6EH0fMjRDK38hMC78R2cbMjbabmLG6COc6GbzQ=";
             };
 
             nativeBuildInputs = [ pkgs.nodejs pkgs.pnpm_10 pkgs.pnpmConfigHook ];

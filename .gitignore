@@ -8,6 +8,9 @@ backend/target/
 frontend/node_modules/
 frontend/dist/
 
+# Storybook static build output
+frontend/storybook-static/
+
 # Generated TypeScript bindings (emitted by ts-rs via `cargo test`).
 # See backend/.cargo/config.toml for TS_RS_EXPORT_DIR anchoring.
 frontend/src/types/*.ts
