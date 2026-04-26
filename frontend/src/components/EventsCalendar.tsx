@@ -126,16 +126,8 @@ export default function EventsCalendar({
   defaultView = 'month',
   agendaLength = 90, // Default to 90 days
 }: EventsCalendarProps) {
-  // Use agenda view by default on mobile (< 500px)
-  const getInitialView = () => {
-    if (typeof window !== 'undefined' && window.innerWidth < 500) {
-      return 'agenda'
-    }
-    return defaultView
-  }
-
   const [currentDate, setCurrentDate] = useState(defaultDate)
-  const [view, setView] = useState<'month' | 'agenda'>(getInitialView())
+  const [view, setView] = useState<'month' | 'agenda'>(defaultView)
 
   // Build date -> term week abbreviation lookup
   const termWeekByDate = new Map<string, string>()
