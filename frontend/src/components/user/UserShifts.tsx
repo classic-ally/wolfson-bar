@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { getMyShifts, UserShift, cancelShiftSignup } from '../../lib/auth'
+import { getMyShifts, cancelShiftSignup } from '../../lib/auth'
+import type { UserShift } from '../../types/UserShift'
 import { usePageTitle } from '../../hooks/usePageTitle'
 
 export default function UserShifts() {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { getBarHours, updateBarHours, BarHours } from '../../lib/auth'
+import { getBarHours, updateBarHours } from '../../lib/auth'
+import type { BarHours } from '../../types/BarHours'
 import { usePageTitle } from '../../hooks/usePageTitle'
 
 export default function CommitteeHours() {

@@ -15,14 +15,14 @@ use crate::models::{ErrorResponse, User, IS_ROTA_MEMBER_SQL};
 use crate::routes::auth::{AppState, create_user_in_db};
 
 #[derive(Debug, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../frontend/src/types/")]
+#[ts(export)]
 pub struct PendingCertificate {
     pub user_id: String,
     pub display_name: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../frontend/src/types/")]
+#[ts(export)]
 pub struct ActiveMember {
     pub user_id: String,
     pub display_name: Option<String>,
@@ -32,7 +32,7 @@ pub struct ActiveMember {
 }
 
 #[derive(Debug, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../frontend/src/types/")]
+#[ts(export)]
 pub struct PendingContract {
     pub user_id: String,
     pub display_name: Option<String>,
@@ -340,7 +340,7 @@ pub async fn approve_contract(
 
 // Bar hours management
 #[derive(Debug, Serialize, Deserialize, TS, sqlx::FromRow)]
-#[ts(export, export_to = "../frontend/src/types/")]
+#[ts(export)]
 pub struct BarHours {
     pub day_of_week: i32,  // 0=Sunday, 1=Monday, ..., 6=Saturday
     pub open_time: String,
@@ -436,13 +436,19 @@ pub async fn update_bar_hours(
 
 // Committee dashboard overview stats
 #[derive(Debug, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../frontend/src/types/")]
+#[ts(export)]
 pub struct OverviewStats {
+    #[ts(type = "number")]
     pub active_members_count: i64,
+    #[ts(type = "number")]
     pub pending_certificates_count: i64,
+    #[ts(type = "number")]
     pub pending_contracts_count: i64,
+    #[ts(type = "number")]
     pub unstaffed_shifts_next_3_days: i64,
+    #[ts(type = "number")]
     pub understaffed_events_next_7_days: i64,
+    #[ts(type = "number")]
     pub expiring_contracts_next_30_days: i64,
 }
 
@@ -530,7 +536,7 @@ pub async fn get_overview_stats(
 // ===== Admin-only endpoints (user management) =====
 
 #[derive(Debug, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../frontend/src/types/")]
+#[ts(export)]
 pub struct UserListItem {
     pub id: String,
     pub display_name: Option<String>,
@@ -890,7 +896,7 @@ pub struct BulkImportRequest {
 }
 
 #[derive(Debug, Serialize, TS)]
-#[ts(export, export_to = "../frontend/src/types/")]
+#[ts(export)]
 pub struct BulkImportDetail {
     pub email: String,
     pub status: String, // "created", "skipped", "error"
@@ -898,7 +904,7 @@ pub struct BulkImportDetail {
 }
 
 #[derive(Debug, Serialize, TS)]
-#[ts(export, export_to = "../frontend/src/types/")]
+#[ts(export)]
 pub struct BulkImportResult {
     pub created: i32,
     pub skipped: i32,

@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
-import { getPendingCertificates, getPendingContracts, getActiveMembers, approveCertificate, approveContract, PendingCertificate, PendingContract, ActiveMember } from '../../lib/auth'
+import { getPendingCertificates, getPendingContracts, getActiveMembers, approveCertificate, approveContract } from '../../lib/auth'
+import type { PendingCertificate } from '../../types/PendingCertificate'
+import type { PendingContract } from '../../types/PendingContract'
+import type { ActiveMember } from '../../types/ActiveMember'
 import { usePageTitle } from '../../hooks/usePageTitle'
 import CertificateModal from '../CertificateModal'
 

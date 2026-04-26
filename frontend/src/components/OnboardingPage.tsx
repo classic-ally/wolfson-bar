@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { getUserStatus, UserStatus, acceptCodeOfConduct, uploadCertificate, updateDisplayName, submitContractRequest, acceptPrivacy, startPasskeySetup, getInductionDates, signupForInduction, cancelInductionSignup, InductionDate, canSignupForShifts, isRotaMember } from '../lib/auth'
+import { getUserStatus, acceptCodeOfConduct, uploadCertificate, updateDisplayName, submitContractRequest, acceptPrivacy, startPasskeySetup, getInductionDates, signupForInduction, cancelInductionSignup, canSignupForShifts, isRotaMember } from '../lib/auth'
+import type { UserStatus } from '../types/UserStatus'
+import type { InductionDate } from '../types/InductionDate'
 import CodeOfConduct from './CodeOfConduct'
 
 export default function OnboardingPage() {

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import EventsCalendar from './EventsCalendar'
-import { getEvents, Event } from '../lib/auth'
+import { getEvents } from '../lib/auth'
+import type { Event } from '../types/Event'
 
 const API_BASE = window.location.origin
 

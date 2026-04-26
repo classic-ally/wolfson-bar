@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { isLoggedIn, getUserStatus, startPasskeySetup, UserStatus } from '../lib/auth'
+import { isLoggedIn, getUserStatus, startPasskeySetup } from '../lib/auth'
+import type { UserStatus } from '../types/UserStatus'
 
 const DISMISS_KEY = 'passkey_nudge_dismissed'
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { getUserStatus, isLoggedIn, UserStatus, isRotaMember, canSignupForShifts } from '../lib/auth'
+import { getUserStatus, isLoggedIn, isRotaMember, canSignupForShifts } from '../lib/auth'
+import type { UserStatus } from '../types/UserStatus'
 
 interface OnboardingStatusBarProps {
   onNavigateToOnboarding: () => void

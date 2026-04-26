@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { getPendingInductionApprovals, markInduction, markSupervisedShift, verifyInduction, PendingInductionApproval } from '../../lib/auth'
+import { getPendingInductionApprovals, markInduction, markSupervisedShift, verifyInduction } from '../../lib/auth'
+import type { PendingInductionApproval } from '../../types/PendingInductionApproval'
 import { usePageTitle } from '../../hooks/usePageTitle'
 import QRScanner from '../QRScanner'
 

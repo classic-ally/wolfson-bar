@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
-import { getAllUsers, promoteUser, demoteUser, deleteUser, markCoC, markInduction, markSupervisedShift, adminUploadCertificate, adminSetContract, adminClearContract, adminSetEmail, UserListItem, getUserId } from '../../lib/auth'
+import { getAllUsers, promoteUser, demoteUser, deleteUser, markCoC, markInduction, markSupervisedShift, adminUploadCertificate, adminSetContract, adminClearContract, adminSetEmail, getUserId } from '../../lib/auth'
+import type { UserListItem } from '../../types/UserListItem'
 import { usePageTitle } from '../../hooks/usePageTitle'
 
 function ActionsDropdown({ user, currentUserId, isLastAdmin, actionInProgress, onAction }: {

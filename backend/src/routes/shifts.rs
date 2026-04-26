@@ -20,7 +20,7 @@ pub struct ShiftsQuery {
 }
 
 #[derive(Debug, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../frontend/src/types/")]
+#[ts(export)]
 pub struct ShiftSignupUser {
     pub user_id: String,
     pub display_name: Option<String>,
@@ -28,7 +28,7 @@ pub struct ShiftSignupUser {
 }
 
 #[derive(Debug, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../frontend/src/types/")]
+#[ts(export)]
 pub struct ShiftInfo {
     pub date: String,
     pub event_title: Option<String>,
@@ -45,7 +45,7 @@ pub struct ShiftInfo {
 }
 
 #[derive(Debug, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../frontend/src/types/")]
+#[ts(export)]
 pub struct UserShift {
     pub date: String,
     pub event_title: Option<String>,

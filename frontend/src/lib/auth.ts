@@ -1,13 +1,22 @@
 import { startRegistration, startAuthentication } from '@simplewebauthn/browser'
+import type { AuthResponse } from '../types/AuthResponse'
+import type { UserStatus } from '../types/UserStatus'
+import type { PendingCertificate } from '../types/PendingCertificate'
+import type { ActiveMember } from '../types/ActiveMember'
+import type { VerificationToken } from '../types/VerificationToken'
+import type { PendingContract } from '../types/PendingContract'
+import type { Event } from '../types/Event'
+import type { ShiftInfo } from '../types/ShiftInfo'
+import type { UserShift } from '../types/UserShift'
+import type { BarHours } from '../types/BarHours'
+import type { OverviewStats } from '../types/OverviewStats'
+import type { UserOverview } from '../types/UserOverview'
+import type { UserListItem } from '../types/UserListItem'
+import type { BulkImportResult } from '../types/BulkImportResult'
+import type { InductionDate } from '../types/InductionDate'
+import type { PendingInductionApproval } from '../types/PendingInductionApproval'
 
 const API_BASE = window.location.origin
-
-export interface AuthResponse {
-  token: string
-  user_id: string
-  is_committee: boolean
-  is_admin: boolean
-}
 
 export class AuthError extends Error {
   constructor(message: string) {
@@ -205,23 +214,6 @@ export async function authenticatedFetch(url: string, options: RequestInit = {})
   return response
 }
 
-export interface UserStatus {
-  user_id: string
-  display_name: string | null
-  is_committee: boolean
-  code_of_conduct_signed: boolean
-  food_safety_completed: boolean
-  has_food_safety_certificate: boolean
-  induction_completed: boolean
-  has_contract: boolean
-  contract_expiry_date: string | null
-  email: string | null
-  email_notifications_enabled: boolean
-  privacy_consent_given: boolean
-  has_passkey: boolean
-  supervised_shift_completed: boolean
-}
-
 type RotaPredicateFields = Pick<
   UserStatus,
   'induction_completed' | 'code_of_conduct_signed' | 'food_safety_completed' | 'supervised_shift_completed'
@@ -293,18 +285,6 @@ export async function uploadCertificate(file: File): Promise<void> {
   }
 }
 
-export interface PendingCertificate {
-  user_id: string
-  display_name: string | null
-}
-
-export interface ActiveMember {
-  user_id: string
-  display_name: string | null
-  has_contract: boolean
-  contract_expiry_date: string | null
-  is_committee: boolean
-}
 
 /**
  * Get pending food safety certificates (committee only)
@@ -357,9 +337,6 @@ export async function approveCertificate(userId: string): Promise<void> {
   }
 }
 
-export interface VerificationToken {
-  token: string
-}
 
 /**
  * Get verification token for QR code
@@ -426,11 +403,6 @@ export async function getActiveMembers(): Promise<ActiveMember[]> {
   return response.json()
 }
 
-export interface PendingContract {
-  user_id: string
-  display_name: string | null
-  contract_expiry_date: string
-}
 
 /**
  * Submit contract request with expiry date
@@ -478,17 +450,6 @@ export async function approveContract(userId: string): Promise<void> {
   }
 }
 
-export interface Event {
-  id: string
-  title: string
-  description: string | null
-  event_date: string
-  start_time: string | null
-  end_time: string | null
-  shift_max_volunteers: number | null
-  shift_requires_contract: boolean | null
-}
-
 /**
  * Get events within date range (public endpoint, no auth required)
  */
@@ -526,31 +487,6 @@ export async function getTermWeeks(): Promise<TermWeek[]> {
   return response.json()
 }
 
-export interface ShiftSignupUser {
-  user_id: string
-  display_name: string | null
-  is_committee: boolean
-}
-
-export interface ShiftInfo {
-  date: string
-  event_title: string | null
-  event_description: string | null
-  max_volunteers: number
-  requires_contract: boolean
-  signups_count: number
-  signups: ShiftSignupUser[]
-  open_time: string | null
-  close_time: string | null
-  has_induction_availability: boolean
-  induction_signups_count: number
-  current_user_induction_available: boolean
-}
-
-export interface UserShift {
-  date: string
-  event_title: string | null
-}
 
 /**
  * Get shift information for date range (authenticated)
@@ -640,12 +576,6 @@ export async function getMyShifts(): Promise<UserShift[]> {
   return response.json()
 }
 
-export interface BarHours {
-  day_of_week: number  // 0=Sunday, 1=Monday, ..., 6=Saturday
-  open_time: string
-  close_time: string
-}
-
 /**
  * Get bar hours (committee only)
  */
@@ -682,15 +612,6 @@ export async function updateBarHours(dayOfWeek: number, openTime: string, closeT
   }
 }
 
-export interface OverviewStats {
-  active_members_count: number
-  pending_certificates_count: number
-  pending_contracts_count: number
-  unstaffed_shifts_next_3_days: number
-  understaffed_events_next_7_days: number
-  expiring_contracts_next_30_days: number
-}
-
 /**
  * Get overview statistics for committee dashboard
  */
@@ -703,12 +624,6 @@ export async function getOverviewStats(): Promise<OverviewStats> {
   }
 
   return response.json()
-}
-
-export interface UserOverview {
-  next_onboarding_step: string | null
-  shifts_next_7_days: number
-  contract_expiry_date: string | null
 }
 
 /**
@@ -950,18 +865,6 @@ export async function createStockTransactions(request: CreateTransactionsRequest
 
 // ===== Admin User Management (admin only) =====
 
-export interface UserListItem {
-  id: string
-  display_name: string | null
-  email: string | null
-  is_committee: boolean
-  is_admin: boolean
-  code_of_conduct_signed: boolean
-  induction_completed: boolean
-  supervised_shift_completed: boolean
-  created_at: string
-}
-
 /**
  * Get all users (admin only)
  */
@@ -1055,19 +958,6 @@ export interface BulkImportUser {
   display_name?: string
 }
 
-export interface BulkImportDetail {
-  email: string
-  status: string
-  message: string | null
-}
-
-export interface BulkImportResult {
-  created: number
-  skipped: number
-  errors: string[]
-  details: BulkImportDetail[]
-}
-
 export async function bulkImportUsers(users: BulkImportUser[]): Promise<BulkImportResult> {
   const response = await authenticatedFetch(`${API_BASE}/api/admin/users/bulk-import`, {
     method: 'POST',
@@ -1142,28 +1032,6 @@ export async function adminSetEmail(userId: string, email: string): Promise<void
 }
 
 // ===== Induction System =====
-
-export interface InductionDateInductee {
-  user_id: string
-  display_name: string | null
-  full_shift: boolean
-}
-
-export interface InductionDate {
-  date: string
-  has_full_shift_committee: boolean
-  slots_remaining: number
-  user_signed_up: boolean
-  user_signed_up_full_shift: boolean
-  inductees: InductionDateInductee[]
-}
-
-export interface PendingInductionApproval {
-  shift_date: string
-  user_id: string
-  display_name: string | null
-  full_shift: boolean
-}
 
 export async function setInductionAvailability(date: string): Promise<void> {
   const response = await authenticatedFetch(`${API_BASE}/api/shifts/${date}/induction-availability`, {

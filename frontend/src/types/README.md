@@ -1,29 +1,24 @@
 # Generated Types
 
-This directory will contain TypeScript types automatically generated from the Rust backend using `ts-rs`.
+TypeScript bindings emitted from Rust types in the backend via `ts-rs`.
 
-## Usage
+The `*.ts` files in this directory are gitignored and regenerated on demand.
 
-Types are generated when you run tests in the Rust backend:
+## How they get here
 
-```bash
-cd ../backend
-cargo test
-```
+- `pnpm dev` and `pnpm build` regenerate via the `prebuild`/`predev` lifecycle scripts.
+- `nix develop` regenerates on shell entry if missing (see `flake.nix` shellHook).
+- `nix build` produces them through a dedicated `ts-bindings` derivation that the `frontend` derivation copies in.
+- Manual: `cd ../../backend && cargo test --tests export_bindings_` (or `pnpm gen-types` from `frontend/`).
 
-This will generate files like:
-- `Event.ts`
-- `Shift.ts`
-- `User.ts`
-- etc.
+## Path resolution
 
-Then import them in your frontend:
+`backend/.cargo/config.toml` sets `TS_RS_EXPORT_DIR` relative to the backend crate root, so the destination is stable regardless of where `cargo test` is invoked from.
+
+## Importing
 
 ```typescript
-import { Event } from './types/Event'
-import { Shift } from './types/Shift'
+import type { UserStatus } from '../types/UserStatus'
 ```
 
-## Manual Types
-
-Until the backend is ready, we're using manual type definitions in `App.tsx`.
+Components import directly from `../types/X`; data shapes are not re-exported through `lib/auth.ts`.

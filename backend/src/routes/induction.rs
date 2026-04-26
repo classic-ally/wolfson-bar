@@ -100,7 +100,7 @@ pub async fn remove_induction_availability(
 // ===== Induction Dates (Any Authenticated User) =====
 
 #[derive(Debug, Serialize, TS)]
-#[ts(export, export_to = "../frontend/src/types/")]
+#[ts(export)]
 pub struct InductionDateInductee {
     pub user_id: String,
     pub display_name: Option<String>,
@@ -108,7 +108,7 @@ pub struct InductionDateInductee {
 }
 
 #[derive(Debug, Serialize, TS)]
-#[ts(export, export_to = "../frontend/src/types/")]
+#[ts(export)]
 pub struct InductionDate {
     pub date: String,
     pub has_full_shift_committee: bool,
@@ -380,7 +380,7 @@ pub async fn admin_mark_supervised(
 // ===== Committee: Pending Induction Approvals =====
 
 #[derive(Debug, Serialize, TS)]
-#[ts(export, export_to = "../frontend/src/types/")]
+#[ts(export)]
 pub struct PendingInductionApproval {
     pub shift_date: String,
     pub user_id: String,

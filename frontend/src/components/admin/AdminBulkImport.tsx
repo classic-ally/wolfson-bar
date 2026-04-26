@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { bulkImportUsers, BulkImportUser, BulkImportResult } from '../../lib/auth'
+import { bulkImportUsers, BulkImportUser } from '../../lib/auth'
+import type { BulkImportResult } from '../../types/BulkImportResult'
 import { usePageTitle } from '../../hooks/usePageTitle'
 
 interface ParsedEntry {

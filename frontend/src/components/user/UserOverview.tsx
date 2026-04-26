@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getMyOverview, UserOverview as UserOverviewType } from '../../lib/auth'
+import { getMyOverview } from '../../lib/auth'
+import type { UserOverview as UserOverviewType } from '../../types/UserOverview'
 import { usePageTitle } from '../../hooks/usePageTitle'
 
 export default function UserOverview() {

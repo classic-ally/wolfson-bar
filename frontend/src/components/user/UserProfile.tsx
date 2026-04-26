@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { getUserStatus, UserStatus, updateDisplayName, submitContractRequest, updateEmail, updateEmailNotifications, exportMyData, deleteMyAccount, logout } from '../../lib/auth'
+import { getUserStatus, updateDisplayName, submitContractRequest, updateEmail, updateEmailNotifications, exportMyData, deleteMyAccount, logout } from '../../lib/auth'
+import type { UserStatus } from '../../types/UserStatus'
 import { usePageTitle } from '../../hooks/usePageTitle'
 
 export default function UserProfile() {

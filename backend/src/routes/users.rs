@@ -14,7 +14,7 @@ use crate::models::ErrorResponse;
 use crate::routes::auth::AppState;
 
 #[derive(Debug, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../frontend/src/types/")]
+#[ts(export)]
 pub struct UserStatus {
     pub user_id: String,
     pub display_name: Option<String>,
@@ -43,9 +43,10 @@ pub struct ContractRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../frontend/src/types/")]
+#[ts(export)]
 pub struct UserOverview {
     pub next_onboarding_step: Option<String>, // "code_of_conduct", "food_safety", "induction", or null if complete
+    #[ts(type = "number")]
     pub shifts_next_7_days: i64,
     pub contract_expiry_date: Option<String>, // null if no contract
 }
@@ -263,7 +264,7 @@ pub struct VerificationQuery {
 }
 
 #[derive(Debug, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../frontend/src/types/")]
+#[ts(export)]
 pub struct VerificationToken {
     pub token: String,
 }

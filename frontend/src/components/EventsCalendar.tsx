@@ -3,7 +3,11 @@ import { Calendar, dateFnsLocalizer, ToolbarProps } from 'react-big-calendar'
 import { format, parse, startOfWeek, getDay } from 'date-fns'
 import { enGB } from 'date-fns/locale'
 import 'react-big-calendar/lib/css/react-big-calendar.css'
-import { Event, ShiftInfo, UserStatus, TermWeek, InductionDate } from '../lib/auth'
+import { TermWeek } from '../lib/auth'
+import type { Event } from '../types/Event'
+import type { ShiftInfo } from '../types/ShiftInfo'
+import type { UserStatus } from '../types/UserStatus'
+import type { InductionDate } from '../types/InductionDate'
 
 interface CalendarEvent {
   id: string

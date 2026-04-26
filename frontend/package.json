@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "gen-types": "cd ../backend && cargo test --quiet --tests 'export_bindings_'",
+    "predev": "pnpm run gen-types",
+    "prebuild": "pnpm run gen-types",
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",

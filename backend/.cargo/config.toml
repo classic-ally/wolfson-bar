@@ -1,0 +1,4 @@
+[env]
+# Anchor ts-rs binding output at frontend/src/types regardless of cwd.
+# `relative = true` resolves the path from this config file's directory.
+TS_RS_EXPORT_DIR = { value = "../frontend/src/types", relative = true }

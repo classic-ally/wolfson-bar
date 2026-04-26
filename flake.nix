@@ -25,6 +25,27 @@
             rustc = pkgs.rust-bin.stable.latest.default;
           };
 
+          # ts-rs bindings emitted by `cargo test`. Output is the directory
+          # containing all *.ts files for frontend/src/types/.
+          ts-bindings = rustPlatform.buildRustPackage {
+            pname = "wolfson-bar-ts-bindings";
+            version = "0.1.0";
+            src = ./backend;
+            cargoLock.lockFile = ./backend/Cargo.lock;
+            nativeBuildInputs = [ pkgs.pkg-config ];
+            buildInputs = [ pkgs.openssl ];
+
+            buildPhase = ''
+              runHook preBuild
+              mkdir -p $out
+              TS_RS_EXPORT_DIR=$out cargo test --release --quiet --tests export_bindings_
+              runHook postBuild
+            '';
+
+            dontInstall = true;
+            doCheck = false;
+          };
+
           frontend = pkgs.stdenvNoCC.mkDerivation {
             pname = "wolfson-bar-frontend";
             version = "0.1.0";
@@ -40,9 +61,16 @@
 
             nativeBuildInputs = [ pkgs.nodejs pkgs.pnpm_10 pkgs.pnpmConfigHook ];
 
+            preBuild = ''
+              mkdir -p src/types
+              cp ${ts-bindings}/*.ts src/types/
+            '';
+
             buildPhase = ''
               runHook preBuild
-              pnpm build
+              # Skip pnpm lifecycle scripts (prebuild runs cargo, not available here);
+              # types are already in place via preBuild above.
+              pnpm exec vite build
               runHook postBuild
             '';
 
@@ -174,6 +202,13 @@
             echo ""
             echo "Backend:  cd backend && cargo run"
             echo "Frontend: cd frontend && pnpm dev"
+            echo ""
+            # Emit ts-rs bindings if missing so tsc has them on first open.
+            if [ ! -f frontend/src/types/UserStatus.ts ]; then
+              echo "Generating ts-rs bindings (first run, may take a moment)..."
+              (cd backend && cargo test --quiet --tests export_bindings_) && \
+                echo "Bindings ready. Re-run this hook or 'pnpm gen-types' after schema changes."
+            fi
           '';
         };
       });

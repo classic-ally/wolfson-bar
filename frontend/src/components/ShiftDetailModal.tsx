@@ -1,5 +1,10 @@
 import { useState, useEffect } from 'react'
-import { ShiftInfo, signupForShift, cancelShiftSignup, removeUserFromShift, getUserId, UserStatus, ActiveMember, getActiveMembers, assignUserToShift, Event, setInductionAvailability, removeInductionAvailability, signupForInduction, cancelInductionSignup, getInductionDates, InductionDateInductee, canSignupForShifts } from '../lib/auth'
+import { signupForShift, cancelShiftSignup, removeUserFromShift, getUserId, getActiveMembers, assignUserToShift, setInductionAvailability, removeInductionAvailability, signupForInduction, cancelInductionSignup, getInductionDates, canSignupForShifts } from '../lib/auth'
+import type { ShiftInfo } from '../types/ShiftInfo'
+import type { UserStatus } from '../types/UserStatus'
+import type { ActiveMember } from '../types/ActiveMember'
+import type { Event } from '../types/Event'
+import type { InductionDateInductee } from '../types/InductionDateInductee'
 
 interface ShiftDetailModalProps {
   shift: ShiftInfo | null

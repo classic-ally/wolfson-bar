@@ -5,7 +5,7 @@ use uuid::Uuid;
 // API Request/Response types (exported to TypeScript)
 
 #[derive(Debug, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../frontend/src/types/")]
+#[ts(export)]
 pub struct RegisterStartRequest {
     pub display_name: String,
     #[serde(default)]
@@ -13,7 +13,7 @@ pub struct RegisterStartRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../frontend/src/types/")]
+#[ts(export)]
 pub struct AuthResponse {
     pub token: String,
     pub user_id: String,
@@ -22,7 +22,7 @@ pub struct AuthResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../frontend/src/types/")]
+#[ts(export)]
 pub struct ErrorResponse {
     pub error: String,
 }
@@ -66,7 +66,7 @@ pub struct AuthState {
 }
 
 #[derive(Debug, Serialize, Deserialize, TS, sqlx::FromRow)]
-#[ts(export, export_to = "../frontend/src/types/")]
+#[ts(export)]
 pub struct Event {
     pub id: String,
     pub title: String,

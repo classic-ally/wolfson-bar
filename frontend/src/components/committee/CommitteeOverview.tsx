@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getOverviewStats, OverviewStats } from '../../lib/auth'
+import { getOverviewStats } from '../../lib/auth'
+import type { OverviewStats } from '../../types/OverviewStats'
 import { usePageTitle } from '../../hooks/usePageTitle'
 
 export default function CommitteeOverview() {

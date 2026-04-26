@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { getUserStatus, UserStatus, acceptCodeOfConduct, uploadCertificate, getInductionDates, signupForInduction, cancelInductionSignup, InductionDate, canSignupForShifts, isRotaMember } from '../../lib/auth'
+import { getUserStatus, acceptCodeOfConduct, uploadCertificate, getInductionDates, signupForInduction, cancelInductionSignup, canSignupForShifts, isRotaMember } from '../../lib/auth'
+import type { UserStatus } from '../../types/UserStatus'
+import type { InductionDate } from '../../types/InductionDate'
 import { usePageTitle } from '../../hooks/usePageTitle'
 import CodeOfConduct from '../CodeOfConduct'
 

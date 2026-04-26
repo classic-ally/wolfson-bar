@@ -28,7 +28,11 @@ import PasskeyNudgeBanner from './components/PasskeyNudgeBanner'
 import ProtectedRoute from './components/ProtectedRoute'
 import MagicLinkCallback from './components/MagicLinkCallback'
 import PrivacyPage from './components/PrivacyPage'
-import { isLoggedIn, isCommittee, getEvents, Event, getShifts, ShiftInfo, getUserStatus, UserStatus, getTermWeeks, TermWeek, getInductionDates, InductionDate } from './lib/auth'
+import { isLoggedIn, isCommittee, getEvents, getShifts, getUserStatus, getTermWeeks, TermWeek, getInductionDates } from './lib/auth'
+import type { Event } from './types/Event'
+import type { ShiftInfo } from './types/ShiftInfo'
+import type { UserStatus } from './types/UserStatus'
+import type { InductionDate } from './types/InductionDate'
 
 // Helper to get date range for events (3 months before to 3 months after current month)
 function getEventsDateRange() {
