@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { getUserStatus, acceptCodeOfConduct, uploadCertificate, getInductionDates, signupForInduction, cancelInductionSignup, canSignupForShifts, isRotaMember } from '../../lib/auth'
+import { getUserStatus, acceptCodeOfConduct, uploadCertificate, getInductionDates, signupForInduction, cancelInductionSignup, getVerificationToken, canSignupForShifts, isRotaMember } from '../../lib/auth'
 import type { UserStatus } from '../../types/UserStatus'
 import type { InductionDate } from '../../types/InductionDate'
 import { usePageTitle } from '../../hooks/usePageTitle'
+import QRCode from 'qrcode'
 import CodeOfConduct from '../CodeOfConduct'
 
 export default function UserInduction() {
@@ -15,6 +16,9 @@ export default function UserInduction() {
   const [inductionSignupDate, setInductionSignupDate] = useState<string | null>(null)
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [wantsFullShift, setWantsFullShift] = useState(false)
+  const [showQR, setShowQR] = useState(false)
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
+  const [generatingQR, setGeneratingQR] = useState(false)
   usePageTitle('Onboarding')
 
   useEffect(() => {
@@ -116,6 +120,21 @@ export default function UserInduction() {
     }
   }
 
+  const handleShowQR = async () => {
+    setGeneratingQR(true)
+    try {
+      const token = await getVerificationToken('induction')
+      const qr = await QRCode.toDataURL(token, { width: 300 })
+      setQrDataUrl(qr)
+      setShowQR(true)
+    } catch (err) {
+      console.error('Failed to generate QR code:', err)
+      alert(err instanceof Error ? err.message : 'Failed to generate QR code. Please try again.')
+    } finally {
+      setGeneratingQR(false)
+    }
+  }
+
   const handleCancelInduction = async (date: string) => {
     try {
       await cancelInductionSignup(date)
@@ -144,6 +163,40 @@ export default function UserInduction() {
 
   if (showCoc) {
     return <CodeOfConduct onAccept={handleCocAccept} onDecline={handleCocDecline} />
+  }
+
+  if (showQR && qrDataUrl) {
+    return (
+      <div style={{ maxWidth: '500px', margin: '40px auto', padding: '20px', textAlign: 'center' }}>
+        <h2>Induction Verification QR Code</h2>
+        <p style={{ color: '#666', marginBottom: '20px' }}>
+          Show this QR code to a committee member during your induction.
+          This code expires in 5 minutes.
+        </p>
+        <div style={{
+          backgroundColor: 'white',
+          padding: '20px',
+          borderRadius: '8px',
+          border: '2px solid #ddd',
+          marginBottom: '20px'
+        }}>
+          <img src={qrDataUrl} alt="Verification QR Code" style={{ maxWidth: '100%' }} />
+        </div>
+        <button
+          onClick={() => { setShowQR(false); setQrDataUrl(null) }}
+          style={{
+            padding: '10px 20px',
+            backgroundColor: '#666',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+          }}
+        >
+          Close
+        </button>
+      </div>
+    )
   }
 
   const isFullyOnboarded = isRotaMember(status)
@@ -194,20 +247,37 @@ export default function UserInduction() {
                   <p style={{ margin: '0 0 8px 0', color: '#155724', fontSize: '14px' }}>
                     You are signed up for induction on <strong>{formatDate(inductionSignupDate)}</strong>
                   </p>
-                  <button
-                    onClick={() => handleCancelInduction(inductionSignupDate)}
-                    style={{
-                      padding: '6px 12px',
-                      backgroundColor: '#dc3545',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      fontSize: '13px'
-                    }}
-                  >
-                    Cancel Signup
-                  </button>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      onClick={handleShowQR}
+                      disabled={generatingQR}
+                      style={{
+                        padding: '6px 12px',
+                        backgroundColor: generatingQR ? '#ccc' : '#8B0000',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: generatingQR ? 'not-allowed' : 'pointer',
+                        fontSize: '13px'
+                      }}
+                    >
+                      {generatingQR ? 'Generating…' : 'Show QR Code for Verification'}
+                    </button>
+                    <button
+                      onClick={() => handleCancelInduction(inductionSignupDate)}
+                      style={{
+                        padding: '6px 12px',
+                        backgroundColor: '#dc3545',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '13px'
+                      }}
+                    >
+                      Cancel Signup
+                    </button>
+                  </div>
                 </div>
               ) : inductionDates.length === 0 ? (
                 <p style={{ color: '#888', fontSize: '14px', margin: 0 }}>

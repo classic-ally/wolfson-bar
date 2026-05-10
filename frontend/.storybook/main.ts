@@ -13,6 +13,13 @@ const config: StorybookConfig = {
     "@storybook/addon-onboarding",
     "storybook/viewport"
   ],
-  "framework": "@storybook/react-vite"
+  "framework": "@storybook/react-vite",
+  // Allow remote access (e.g. Tailscale hostnames) — Vite blocks unknown
+  // Host headers by default. Dev-only; not a security concern here.
+  viteFinal: async (config) => {
+    config.server = config.server ?? {}
+    config.server.allowedHosts = true
+    return config
+  },
 };
 export default config;
