@@ -140,14 +140,21 @@ pub async fn get_certificate(
         )
     })?;
 
-    // Use stored content type, or default to image/jpeg for legacy data
-    let content_type = target_user.food_safety_certificate_type
-        .unwrap_or_else(|| "image/jpeg".to_string());
+    // The bytes are authoritative — sniff them so historically
+    // mis-typed/NULL rows are corrected at serve time (before the
+    // backfill migration has necessarily touched them). Fall back to the
+    // stored column, then octet-stream.
+    let content_type = crate::routes::cert_type::sniff_certificate_type(&certificate_bytes)
+        .map(|s| s.to_string())
+        .or(target_user.food_safety_certificate_type)
+        .unwrap_or_else(|| "application/octet-stream".to_string());
 
-    // Return file as response with correct content type
+    // Return file as response with correct content type. Inline so the
+    // browser renders (PDF viewer / image) rather than downloading.
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, content_type)
+        .header(header::CONTENT_DISPOSITION, "inline")
         .body(Body::from(certificate_bytes))
         .unwrap())
 }
@@ -1119,20 +1126,21 @@ pub async fn admin_upload_certificate(
         return Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "File must be under 5 MB".to_string() })));
     }
 
-    // Validate content type
-    let stored_type = if let Some(ref ct) = content_type {
-        if !ct.starts_with("image/") && ct != "application/pdf" {
-            return Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Only image files and PDFs are allowed".to_string() })));
-        }
-        ct.clone()
-    } else {
-        "application/octet-stream".to_string()
-    };
+    // Sniff the content type from the bytes — never trust the client's
+    // declared multipart MIME (see cert_type module / users.rs upload).
+    let stored_type = crate::routes::cert_type::sniff_certificate_type(&file_bytes)
+        .ok_or_else(|| {
+            (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Unsupported file type — upload a PDF or image".to_string() }))
+        })?;
+    info!(
+        "📸 Admin storing certificate ({} bytes, type: {}, client declared: {:?}) for user: {}",
+        file_bytes.len(), stored_type, content_type, target_user_id
+    );
 
     // Store certificate and auto-approve
     sqlx::query("UPDATE users SET food_safety_certificate = ?, food_safety_certificate_type = ?, food_safety_completed = TRUE WHERE id = ?")
         .bind(&file_bytes)
-        .bind(&stored_type)
+        .bind(stored_type)
         .bind(&target_user_id)
         .execute(&state.db)
         .await
@@ -1255,7 +1263,7 @@ mod tests {
     use crate::test_util::{insert_shift_signup, insert_user, test_state, user_with, user_with_role};
     use axum::body::Body;
     use axum::http::{Request, StatusCode as Status};
-    use axum::routing::get;
+    use axum::routing::{get, post};
     use axum::Router;
     use tower::ServiceExt;
 
@@ -1439,5 +1447,228 @@ mod tests {
         let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let members: Vec<UnallocatedMember> = serde_json::from_slice(&body_bytes).unwrap();
         assert!(members.is_empty(), "no rota members inserted");
+    }
+
+    // -------- get_certificate serve-time sniff --------
+
+    const PDF: &[u8] = b"%PDF-1.4\n%\xE2\xE3\xCF\xD3\nbody\n%%EOF";
+    const PNG: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00];
+
+    async fn seed_cert(state: &AppState, user_id: &str, bytes: &[u8], stored_type: Option<&str>) {
+        sqlx::query(
+            "UPDATE users SET food_safety_certificate = ?, food_safety_certificate_type = ? WHERE id = ?",
+        )
+        .bind(bytes)
+        .bind(stored_type)
+        .bind(user_id)
+        .execute(&state.db)
+        .await
+        .unwrap();
+    }
+
+    async fn served_content_type(state: AppState, committee: User, target: &str) -> String {
+        let resp = get_certificate(State(state), CommitteeUser(committee), Path(target.to_string()))
+            .await
+            .expect("certificate served");
+        resp.headers()
+            .get(header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn serve_corrects_pdf_stored_as_jpeg() {
+        let state = test_state().await;
+        let committee = user_with_role(true, false);
+        insert_user(&state.db, &committee).await;
+        // Historically mis-typed row: PDF bytes labelled image/jpeg.
+        seed_cert(&state, &committee.id, PDF, Some("image/jpeg")).await;
+
+        let ct = served_content_type(state, committee.clone(), &committee.id).await;
+        assert_eq!(ct, "application/pdf");
+    }
+
+    #[tokio::test]
+    async fn serve_corrects_png_with_null_stored_type() {
+        let state = test_state().await;
+        let committee = user_with_role(true, false);
+        insert_user(&state.db, &committee).await;
+        seed_cert(&state, &committee.id, PNG, None).await;
+
+        let ct = served_content_type(state, committee.clone(), &committee.id).await;
+        assert_eq!(ct, "image/png");
+    }
+
+    #[tokio::test]
+    async fn serve_404_when_no_certificate() {
+        let state = test_state().await;
+        let committee = user_with_role(true, false);
+        insert_user(&state.db, &committee).await;
+
+        let err = get_certificate(
+            State(state),
+            CommitteeUser(committee.clone()),
+            Path(committee.id.clone()),
+        )
+        .await
+        .expect_err("no certificate");
+        assert_eq!(err.0, Status::NOT_FOUND);
+    }
+
+    // -------- admin_upload_certificate: byte-sniff is authoritative --------
+
+    fn upload_app(state: AppState) -> Router {
+        Router::new()
+            .route(
+                "/api/admin/users/:user_id/upload-certificate",
+                post(admin_upload_certificate),
+            )
+            .with_state(state)
+    }
+
+    /// Multipart body with one `certificate` part. `declared` is the
+    /// part's Content-Type (None = omit it, like an empty File.type).
+    fn multipart_body(declared: Option<&str>, bytes: &[u8]) -> (String, Vec<u8>) {
+        let boundary = "ADMINBOUNDARY42";
+        let mut body = Vec::new();
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            b"Content-Disposition: form-data; name=\"certificate\"; filename=\"c.bin\"\r\n",
+        );
+        if let Some(ct) = declared {
+            body.extend_from_slice(format!("Content-Type: {ct}\r\n").as_bytes());
+        }
+        body.extend_from_slice(b"\r\n");
+        body.extend_from_slice(bytes);
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        (format!("multipart/form-data; boundary={boundary}"), body)
+    }
+
+    async fn admin_upload(
+        state: &AppState,
+        token: Option<&str>,
+        target: &str,
+        declared: Option<&str>,
+        bytes: &[u8],
+    ) -> Status {
+        let (content_type, body) = multipart_body(declared, bytes);
+        let mut builder = Request::builder()
+            .method("POST")
+            .uri(format!("/api/admin/users/{target}/upload-certificate"))
+            .header("content-type", content_type);
+        if let Some(t) = token {
+            builder = builder.header("authorization", format!("Bearer {t}"));
+        }
+        let req = builder.body(Body::from(body)).unwrap();
+        upload_app(state.clone()).oneshot(req).await.unwrap().status()
+    }
+
+    async fn stored_type(state: &AppState, user_id: &str) -> Option<String> {
+        sqlx::query_scalar::<_, Option<String>>(
+            "SELECT food_safety_certificate_type FROM users WHERE id = ?",
+        )
+        .bind(user_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap()
+    }
+
+    fn admin_with_token(state: &AppState) -> (User, String) {
+        let admin = user_with_role(true, true);
+        let token = create_jwt_token(&admin.id, &state.jwt_secret).unwrap();
+        (admin, token)
+    }
+
+    #[tokio::test]
+    async fn admin_upload_pdf_mislabeled_as_jpeg_is_stored_as_pdf() {
+        let state = test_state().await;
+        let (admin, token) = admin_with_token(&state);
+        insert_user(&state.db, &admin).await;
+        let mut target = user_with_role(false, false);
+        target.id = "target-1".into();
+        insert_user(&state.db, &target).await;
+
+        let status = admin_upload(&state, Some(&token), &target.id, Some("image/jpeg"), PDF).await;
+        assert_eq!(status, Status::OK);
+        assert_eq!(stored_type(&state, &target.id).await.as_deref(), Some("application/pdf"));
+    }
+
+    #[tokio::test]
+    async fn admin_upload_pdf_with_no_declared_type_is_accepted() {
+        let state = test_state().await;
+        let (admin, token) = admin_with_token(&state);
+        insert_user(&state.db, &admin).await;
+        let mut target = user_with_role(false, false);
+        target.id = "target-2".into();
+        insert_user(&state.db, &target).await;
+
+        let status = admin_upload(&state, Some(&token), &target.id, None, PDF).await;
+        assert_eq!(status, Status::OK);
+        assert_eq!(stored_type(&state, &target.id).await.as_deref(), Some("application/pdf"));
+    }
+
+    #[tokio::test]
+    async fn admin_upload_png_gets_correct_type() {
+        let state = test_state().await;
+        let (admin, token) = admin_with_token(&state);
+        insert_user(&state.db, &admin).await;
+        let mut target = user_with_role(false, false);
+        target.id = "target-3".into();
+        insert_user(&state.db, &target).await;
+
+        let status = admin_upload(&state, Some(&token), &target.id, Some("image/jpeg"), PNG).await;
+        assert_eq!(status, Status::OK);
+        assert_eq!(stored_type(&state, &target.id).await.as_deref(), Some("image/png"));
+    }
+
+    #[tokio::test]
+    async fn admin_upload_garbage_is_rejected() {
+        let state = test_state().await;
+        let (admin, token) = admin_with_token(&state);
+        insert_user(&state.db, &admin).await;
+        let mut target = user_with_role(false, false);
+        target.id = "target-4".into();
+        insert_user(&state.db, &target).await;
+
+        let status = admin_upload(
+            &state,
+            Some(&token),
+            &target.id,
+            Some("application/pdf"),
+            b"not a document at all",
+        )
+        .await;
+        assert_eq!(status, Status::BAD_REQUEST);
+        assert_eq!(stored_type(&state, &target.id).await, None);
+    }
+
+    #[tokio::test]
+    async fn admin_upload_rejects_non_admin_committee_user() {
+        let state = test_state().await;
+        // Committee but NOT admin → AdminUser extractor must reject.
+        let committee = user_with_role(true, false);
+        insert_user(&state.db, &committee).await;
+        let token = create_jwt_token(&committee.id, &state.jwt_secret).unwrap();
+        let mut target = user_with_role(false, false);
+        target.id = "target-5".into();
+        insert_user(&state.db, &target).await;
+
+        let status = admin_upload(&state, Some(&token), &target.id, Some("application/pdf"), PDF).await;
+        assert_eq!(status, Status::FORBIDDEN);
+        assert_eq!(stored_type(&state, &target.id).await, None);
+    }
+
+    #[tokio::test]
+    async fn admin_upload_rejects_unauthenticated() {
+        let state = test_state().await;
+        let mut target = user_with_role(false, false);
+        target.id = "target-6".into();
+        insert_user(&state.db, &target).await;
+
+        let status = admin_upload(&state, None, &target.id, Some("application/pdf"), PDF).await;
+        assert_eq!(status, Status::UNAUTHORIZED);
+        assert_eq!(stored_type(&state, &target.id).await, None);
     }
 }

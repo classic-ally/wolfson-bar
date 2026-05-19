@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
+import { within, expect, waitFor } from 'storybook/test'
 import CertificateModal from './CertificateModal'
 import { Button } from '@/components/ui/button'
 import type { CertificateData } from '@/lib/auth'
@@ -35,6 +36,32 @@ function imageLoader(): Promise<CertificateData> {
   return Promise.resolve({
     url: URL.createObjectURL(blob),
     contentType: 'image/svg+xml',
+  })
+}
+
+// Server fell back to application/octet-stream (unknown type). The viewer
+// must not guess a renderer — it shows the download fallback instead.
+function octetLoader(): Promise<CertificateData> {
+  const blob = new Blob([new Uint8Array([1, 2, 3, 4])], {
+    type: 'application/octet-stream',
+  })
+  return Promise.resolve({
+    url: URL.createObjectURL(blob),
+    contentType: 'application/octet-stream',
+  })
+}
+
+// Declared image/png but the bytes are not a decodable image, so the
+// <img> fires onError. Mirrors a JPEG-stored-as-something-else / corrupt
+// upload: the inline render must fail over to the download fallback
+// rather than leaving a broken element.
+function brokenImageLoader(): Promise<CertificateData> {
+  const blob = new Blob([new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7])], {
+    type: 'image/png',
+  })
+  return Promise.resolve({
+    url: URL.createObjectURL(blob),
+    contentType: 'image/png',
   })
 }
 
@@ -85,6 +112,13 @@ export const ImageCertificate: Story = {
     onOpenChange: () => {},
     onApprove: () => {},
   },
+  play: async () => {
+    // Dialog is portaled to document.body (Radix), outside the canvas.
+    const body = within(document.body)
+    const img = await body.findByAltText('Food Safety Certificate')
+    await expect(img.tagName).toBe('IMG')
+    await expect(body.queryByTitle('Food Safety Certificate')).toBeNull()
+  },
 }
 
 export const PdfCertificate: Story = {
@@ -95,6 +129,61 @@ export const PdfCertificate: Story = {
     open: true,
     onOpenChange: () => {},
     onApprove: () => {},
+  },
+  play: async () => {
+    const body = within(document.body)
+    // The regression: a PDF must reach the <iframe> PDF viewer, never <img>.
+    const frame = await body.findByTitle('Food Safety Certificate')
+    await expect(frame.tagName).toBe('IFRAME')
+    await expect(body.queryByAltText('Food Safety Certificate')).toBeNull()
+    // Download fallback always reachable.
+    await expect(
+      body.getByRole('link', { name: /open the certificate in a new tab/i }),
+    ).toBeInTheDocument()
+  },
+}
+
+export const RenderErrorFallback: Story = {
+  render: () => <Wrapper loader={brokenImageLoader} name="Allison Bentley" startOpen />,
+  args: {
+    userId: 'story-user-cert',
+    displayName: 'Allison Bentley',
+    open: true,
+    onOpenChange: () => {},
+    onApprove: () => {},
+  },
+  play: async () => {
+    const body = within(document.body)
+    // The <img> is attempted, fails to decode, fires onError →
+    // component swaps to the download fallback and drops the broken img.
+    await waitFor(async () => {
+      await expect(
+        body.getByRole('link', { name: /open or download the certificate/i }),
+      ).toBeInTheDocument()
+    })
+    await expect(body.queryByAltText('Food Safety Certificate')).toBeNull()
+  },
+}
+
+export const UnknownTypeFallback: Story = {
+  render: () => <Wrapper loader={octetLoader} name="Allison Bentley" startOpen />,
+  args: {
+    userId: 'story-user-cert',
+    displayName: 'Allison Bentley',
+    open: true,
+    onOpenChange: () => {},
+    onApprove: () => {},
+  },
+  play: async () => {
+    const body = within(document.body)
+    await waitFor(async () => {
+      await expect(
+        body.getByRole('link', { name: /open or download the certificate/i }),
+      ).toBeInTheDocument()
+    })
+    // No renderer guessed for an unknown type.
+    await expect(body.queryByTitle('Food Safety Certificate')).toBeNull()
+    await expect(body.queryByAltText('Food Safety Certificate')).toBeNull()
   },
 }
 

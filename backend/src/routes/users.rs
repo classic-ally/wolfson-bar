@@ -169,27 +169,30 @@ pub async fn upload_certificate(
         ));
     }
 
-    // Validate content type (images and PDFs only)
-    let stored_type = if let Some(ref ct) = content_type {
-        if !ct.starts_with("image/") && ct != "application/pdf" {
-            return Err((
+    // Determine the content type from the file bytes — clients routinely
+    // mislabel PDFs (e.g. scanner apps export a PDF the picker reports as
+    // image/jpeg, or an empty type that becomes application/octet-stream).
+    // The sniffed type is authoritative; the client-declared type is only
+    // logged for diagnostics.
+    let stored_type = crate::routes::cert_type::sniff_certificate_type(&file_bytes)
+        .ok_or_else(|| {
+            (
                 StatusCode::BAD_REQUEST,
                 Json(ErrorResponse {
-                    error: "Only image files and PDFs are allowed".to_string(),
+                    error: "Unsupported file type — upload a PDF or image".to_string(),
                 }),
-            ));
-        }
-        ct.clone()
-    } else {
-        "application/octet-stream".to_string()
-    };
+            )
+        })?;
 
-    info!("📸 Storing certificate ({} bytes, type: {}) for user: {}", file_bytes.len(), stored_type, user.id);
+    info!(
+        "📸 Storing certificate ({} bytes, type: {}, client declared: {:?}) for user: {}",
+        file_bytes.len(), stored_type, content_type, user.id
+    );
 
     // Store BLOB and content type in database
     sqlx::query("UPDATE users SET food_safety_certificate = ?, food_safety_certificate_type = ? WHERE id = ?")
         .bind(&file_bytes)
-        .bind(&stored_type)
+        .bind(stored_type)
         .bind(&user.id)
         .execute(&state.db)
         .await
@@ -766,4 +769,142 @@ pub async fn finish_passkey_setup(
     info!("🎉 Passkey configured for user {}", user.id);
 
     Ok(StatusCode::OK)
+}
+
+#[cfg(test)]
+mod cert_upload_tests {
+    use super::*;
+    use crate::auth::create_jwt_token;
+    use crate::models::User;
+    use crate::test_util::{insert_user, test_state, user_with};
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode as Status};
+    use axum::routing::post;
+    use axum::Router;
+    use tower::ServiceExt;
+
+    const PDF: &[u8] = b"%PDF-1.4\n%\xE2\xE3\xCF\xD3\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF";
+    const JPEG: &[u8] = &[0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, b'J', b'F', b'I', b'F'];
+    const PNG: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00];
+
+    fn build_app(state: AppState) -> Router {
+        Router::new()
+            .route("/api/users/me/food-safety-certificate", post(upload_certificate))
+            .with_state(state)
+    }
+
+    /// Multipart body with one `certificate` part. `declared` is the
+    /// part's Content-Type header (None = omit it, like a browser with
+    /// an empty File.type).
+    fn multipart_body(declared: Option<&str>, bytes: &[u8]) -> (String, Vec<u8>) {
+        let boundary = "TESTBOUNDARY1234";
+        let mut body = Vec::new();
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            b"Content-Disposition: form-data; name=\"certificate\"; filename=\"c.bin\"\r\n",
+        );
+        if let Some(ct) = declared {
+            body.extend_from_slice(format!("Content-Type: {ct}\r\n").as_bytes());
+        }
+        body.extend_from_slice(b"\r\n");
+        body.extend_from_slice(bytes);
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        (
+            format!("multipart/form-data; boundary={boundary}"),
+            body,
+        )
+    }
+
+    async fn upload(state: &AppState, user: &User, declared: Option<&str>, bytes: &[u8]) -> Status {
+        let token = create_jwt_token(&user.id, &state.jwt_secret).unwrap();
+        let (content_type, body) = multipart_body(declared, bytes);
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/users/me/food-safety-certificate")
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", content_type)
+            .body(Body::from(body))
+            .unwrap();
+        build_app(state.clone())
+            .oneshot(req)
+            .await
+            .unwrap()
+            .status()
+    }
+
+    async fn stored_type(state: &AppState, user_id: &str) -> Option<String> {
+        sqlx::query_scalar::<_, Option<String>>(
+            "SELECT food_safety_certificate_type FROM users WHERE id = ?",
+        )
+        .bind(user_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn pdf_mislabeled_as_jpeg_is_stored_as_pdf() {
+        let state = test_state().await;
+        let user = user_with(true, true, false, true);
+        insert_user(&state.db, &user).await;
+
+        // Client lies: declares image/jpeg for PDF bytes (scanner-app case).
+        let status = upload(&state, &user, Some("image/jpeg"), PDF).await;
+        assert_eq!(status, Status::OK);
+        assert_eq!(stored_type(&state, &user.id).await.as_deref(), Some("application/pdf"));
+    }
+
+    #[tokio::test]
+    async fn pdf_with_no_declared_type_is_accepted() {
+        let state = test_state().await;
+        let user = user_with(true, true, false, true);
+        insert_user(&state.db, &user).await;
+
+        // Empty File.type → no part Content-Type. Previously stored as
+        // application/octet-stream (or rejected); now sniffed.
+        let status = upload(&state, &user, None, PDF).await;
+        assert_eq!(status, Status::OK);
+        assert_eq!(stored_type(&state, &user.id).await.as_deref(), Some("application/pdf"));
+    }
+
+    #[tokio::test]
+    async fn jpeg_and_png_get_correct_types() {
+        let state = test_state().await;
+
+        let jpeg_user = user_with(true, true, false, true);
+        insert_user(&state.db, &jpeg_user).await;
+        assert_eq!(upload(&state, &jpeg_user, Some("application/octet-stream"), JPEG).await, Status::OK);
+        assert_eq!(stored_type(&state, &jpeg_user.id).await.as_deref(), Some("image/jpeg"));
+
+        let mut png_user = user_with(true, true, false, true);
+        png_user.id = "png-user".to_string();
+        insert_user(&state.db, &png_user).await;
+        assert_eq!(upload(&state, &png_user, Some("image/jpeg"), PNG).await, Status::OK);
+        assert_eq!(stored_type(&state, &png_user.id).await.as_deref(), Some("image/png"));
+    }
+
+    #[tokio::test]
+    async fn garbage_upload_is_rejected() {
+        let state = test_state().await;
+        let user = user_with(true, true, false, true);
+        insert_user(&state.db, &user).await;
+
+        let status = upload(&state, &user, Some("application/pdf"), b"this is just text, not a document").await;
+        assert_eq!(status, Status::BAD_REQUEST);
+        assert_eq!(stored_type(&state, &user.id).await, None);
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_upload_is_rejected() {
+        let state = test_state().await;
+        let (content_type, body) = multipart_body(Some("application/pdf"), PDF);
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/users/me/food-safety-certificate")
+            .header("content-type", content_type)
+            .body(Body::from(body))
+            .unwrap();
+        let status = build_app(state).oneshot(req).await.unwrap().status();
+        assert_eq!(status, Status::UNAUTHORIZED);
+    }
 }

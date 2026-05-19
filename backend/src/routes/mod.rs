@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod cert_type;
 pub mod users;
 pub mod admin;
 pub mod events;
