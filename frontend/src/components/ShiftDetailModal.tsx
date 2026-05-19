@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { signupForShift, cancelShiftSignup, removeUserFromShift, getUserId, getActiveMembers, assignUserToShift, setInductionAvailability, removeInductionAvailability, signupForInduction, cancelInductionSignup, getInductionDates, canSignupForShifts } from '../lib/auth'
 import type { ShiftInfo } from '../types/ShiftInfo'
 import type { UserStatus } from '../types/UserStatus'
@@ -45,6 +45,7 @@ export default function ShiftDetailModal({ shift, event, userStatus, isCommittee
   const [userInductionSignedUp, setUserInductionSignedUp] = useState(false)
   const [userInductionFullShift, setUserInductionFullShift] = useState(false)
   const [inductionHasFullShiftCommittee, setInductionHasFullShiftCommittee] = useState(false)
+  const dialogRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!shift) return
@@ -200,7 +201,7 @@ export default function ShiftDetailModal({ shift, event, userStatus, isCommittee
 
   return (
     <Dialog open={true} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-auto">
+      <DialogContent ref={dialogRef} className="sm:max-w-lg max-h-[90vh] overflow-auto">
         <DialogHeader>
           <DialogTitle className="text-[#002147]">Shift Details</DialogTitle>
         </DialogHeader>
@@ -365,10 +366,10 @@ export default function ShiftDetailModal({ shift, event, userStatus, isCommittee
                       }
                       itemToStringValue={(item: typeof items[number]) => item.label}
                     >
-                      <ComboboxInput placeholder="Select a member..." />
-                      <ComboboxContent>
+                      <ComboboxInput aria-label="Select a member" placeholder="Select a member..." />
+                      <ComboboxContent container={dialogRef}>
                         <ComboboxEmpty>No members found.</ComboboxEmpty>
-                        <ComboboxList>
+                        <ComboboxList aria-label="Members">
                           {(item: typeof items[number]) => (
                             <ComboboxItem key={item.value} value={item} disabled={item.disabled}>
                               {item.label}

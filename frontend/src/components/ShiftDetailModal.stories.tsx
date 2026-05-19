@@ -1,5 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
+import { http, HttpResponse } from 'msw'
+import { within, userEvent, expect, waitFor } from 'storybook/test'
 import ShiftDetailModal from './ShiftDetailModal'
 import { Button } from '@/components/ui/button'
 import type { ShiftInfo } from '@/types/ShiftInfo'
@@ -199,6 +201,62 @@ export const NeedsSupervisedShift: Story = {
     userStatus: makeUser(),
     onClose: () => {},
     onUpdate: () => {},
+  },
+}
+
+// Regression guard for the Base-UI-Combobox-inside-Radix-modal bug:
+// the popup is portaled into the dialog and must remain interactive.
+// Before the fix, clicking an option did nothing (popup landed in the
+// modal's inert/pointer-events:none zone) and Assign stayed disabled.
+export const CommitteeAssignSelectsMember: Story = {
+  parameters: {
+    msw: {
+      handlers: [
+        http.get('*/api/admin/active-members', () =>
+          HttpResponse.json([
+            { user_id: 'u-grace', display_name: 'Grace Hopper', has_contract: true, contract_expiry_date: null, is_committee: false },
+            { user_id: 'u-ada', display_name: 'Ada Lovelace', has_contract: true, contract_expiry_date: null, is_committee: false },
+          ]),
+        ),
+      ],
+    },
+  },
+  render: () => (
+    <Wrapper
+      shift={makeShift({
+        signups_count: 1,
+        signups: [
+          { user_id: 'u-other', display_name: 'Other Volunteer', is_committee: false },
+        ],
+      })}
+      userStatus={makeUser({ is_committee: true })}
+      isCommittee
+    />
+  ),
+  args: {
+    shift: makeShift(),
+    userStatus: makeUser({ is_committee: true }),
+    isCommittee: true,
+    onClose: () => {},
+    onUpdate: () => {},
+  },
+  play: async ({ canvasElement }) => {
+    // Dialog + combobox popup are portaled to document.body, outside the
+    // story canvas — query the whole document.
+    void canvasElement
+    const body = within(document.body)
+
+    const input = await body.findByPlaceholderText('Select a member...')
+    const assignBtn = body.getByRole('button', { name: /^Assign$/ })
+    await expect(assignBtn).toBeDisabled()
+
+    await userEvent.click(input)
+    const option = await body.findByRole('option', { name: 'Grace Hopper' })
+    await userEvent.click(option)
+
+    // Selection registered → Assign enabled. Fails if the popup is inert.
+    await waitFor(() => expect(assignBtn).toBeEnabled())
+    await expect(input).toHaveValue('Grace Hopper')
   },
 }
 

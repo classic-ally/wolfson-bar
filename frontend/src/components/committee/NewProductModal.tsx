@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Product } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import {
@@ -39,6 +39,7 @@ export default function NewProductModal({
   const [posId, setPosId] = useState<number | null>(null)
   const [name, setName] = useState('')
   const [category, setCategory] = useState('')
+  const dialogRef = useRef<HTMLDivElement>(null)
 
   const handleLink = () => {
     if (selectedLinkProductId !== null) onLink(selectedLinkProductId)
@@ -51,7 +52,7 @@ export default function NewProductModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-auto">
+      <DialogContent ref={dialogRef} className="sm:max-w-lg max-h-[90vh] overflow-auto">
         <DialogHeader>
           <DialogTitle>Barcode Not Found</DialogTitle>
           <DialogDescription>
@@ -77,10 +78,10 @@ export default function NewProductModal({
                 }
                 itemToStringValue={(item: typeof items[number]) => item.label}
               >
-                <ComboboxInput placeholder="Search or select a product..." />
-                <ComboboxContent>
+                <ComboboxInput aria-label="Search or select a product" placeholder="Search or select a product..." />
+                <ComboboxContent container={dialogRef}>
                   <ComboboxEmpty>No products found.</ComboboxEmpty>
-                  <ComboboxList>
+                  <ComboboxList aria-label="Products">
                     {(item: typeof items[number]) => (
                       <ComboboxItem key={item.value} value={item}>
                         {item.label}
