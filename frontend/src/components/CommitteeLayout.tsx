@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom'
 import { isCommittee } from '../lib/auth'
 import { Navigate } from 'react-router-dom'
 import CommitteeNav from './CommitteeNav'
+import Page from './Page'
 
 export default function CommitteeLayout() {
   if (!isCommittee()) {
@@ -9,9 +10,9 @@ export default function CommitteeLayout() {
   }
 
   return (
-    <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
+    <Page size="full">
       <CommitteeNav />
       <Outlet />
-    </div>
+    </Page>
   )
 }

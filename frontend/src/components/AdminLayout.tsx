@@ -1,6 +1,7 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
 import { isAdmin } from '../lib/auth'
 import { Navigate } from 'react-router-dom'
+import Page from './Page'
 
 export default function AdminLayout() {
   const location = useLocation()
@@ -15,7 +16,7 @@ export default function AdminLayout() {
   ]
 
   return (
-    <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
+    <Page size="wide">
       <nav style={{
         borderBottom: '2px solid #dee2e6',
         marginBottom: '30px',
@@ -56,6 +57,6 @@ export default function AdminLayout() {
         </div>
       </nav>
       <Outlet />
-    </div>
+    </Page>
   )
 }

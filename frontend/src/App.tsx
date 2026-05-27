@@ -23,7 +23,9 @@ import UserProfile from './components/user/UserProfile'
 import UserInduction from './components/user/UserInduction'
 import AboutPage from './components/AboutPage'
 import MenuPage from './components/MenuPage'
-import EventsCalendar from './components/EventsCalendar'
+import ShiftSlotCalendar from './components/committee/ShiftSlotCalendar'
+import { Button } from './components/ui/button'
+import Page from './components/Page'
 import ShiftDetailModal from './components/ShiftDetailModal'
 import PasskeyNudgeBanner from './components/PasskeyNudgeBanner'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -104,7 +106,7 @@ function HomePage() {
   usePageTitle()
 
   return (
-    <main className="content">
+    <Page size="wide">
       <div className="hero-image">
         <img src="/pop-art.jpg" alt="Wolfson Bar Pop Art" className="hero-img" />
         <p className="photo-credit">Photo: George Mather</p>
@@ -131,7 +133,52 @@ function HomePage() {
           <p><em>Where beer flows thick as a scholar's dream</em></p>
         </div>
       </div>
-    </main>
+    </Page>
+  )
+}
+
+function CalendarLegendPopup({ userStatus }: { userStatus: UserStatus }) {
+  // Per-visit only: dismiss state resets every time the user navigates to
+  // /events. The legend is short enough that re-showing isn't intrusive.
+  const [open, setOpen] = useState(true)
+
+  if (!open) return null
+
+  const dismiss = () => setOpen(false)
+
+  return (
+    <div className="fixed bottom-4 right-4 z-50 w-[320px] max-w-[calc(100vw-2rem)] rounded-md border border-border bg-popover text-popover-foreground shadow-lg">
+      <button
+        type="button"
+        onClick={dismiss}
+        aria-label="Dismiss"
+        className="absolute right-2 top-2 inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+      >
+        ×
+      </button>
+      <div className="space-y-2 p-4 pr-8 text-sm">
+        {!userStatus.induction_completed ? (
+          <p>
+            <strong>Induction signup:</strong> click a date with a blue{' '}
+            <strong>I</strong> badge to sign up for an induction.
+          </p>
+        ) : (
+          <>
+            <p>
+              <strong>Shift signup:</strong> click any date to view details and sign up.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              🔴 Red = no volunteers · 🟡 Amber = needs more · Grey + strikethrough = full
+            </p>
+            {!userStatus.supervised_shift_completed && (
+              <p className="text-xs text-muted-foreground">
+                Your first shift must be supervised by a committee member.
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -143,7 +190,18 @@ function EventsPage() {
   const [eventsLoading, setEventsLoading] = useState(false)
   const [selectedShift, setSelectedShift] = useState<ShiftInfo | null>(null)
   const [userStatus, setUserStatus] = useState<UserStatus | null>(null)
+  // Cell-selection visual = whatever the modal is currently on. Single source
+  // of truth — no risk of the highlight outliving the modal close.
+  const selectedDate = selectedShift
+    ? new Date(selectedShift.date + 'T00:00:00')
+    : undefined
   usePageTitle('Events Calendar')
+
+  // 3 months back, 3 months forward — same window used to fetch events/shifts.
+  const { fromDate, toDate } = (() => {
+    const r = getEventsDateRange()
+    return { fromDate: new Date(r.start + 'T00:00:00'), toDate: new Date(r.end + 'T00:00:00') }
+  })()
 
   useEffect(() => {
     loadEvents()
@@ -257,55 +315,42 @@ function EventsPage() {
     loadShifts() // Refresh shift data after signup/cancel
   }
 
-  return (
-    <main className="content events-page">
-      <h1 className="page-header" style={{ marginBottom: '20px' }}>Events Calendar</h1>
+  const loggedIn = isLoggedIn()
+  const viewerContext = loggedIn
+    ? ({ kind: 'self' as const, userStatus })
+    : ({ kind: 'public' as const })
 
-      {isLoggedIn() && userStatus && (
-        <div style={{ padding: '10px 20px', backgroundColor: '#e7f3ff', borderRadius: '4px', marginBottom: '20px' }}>
-          {!userStatus.induction_completed ? (
-            <>
-              <strong>Induction Signup:</strong> Click on a blue date to sign up for an induction.
-              <br />
-              <span style={{ fontSize: '14px', color: '#666' }}>
-                🔵 Blue = Induction available | Click to sign up for an induction
-              </span>
-            </>
-          ) : !userStatus.supervised_shift_completed ? (
-            <>
-              <strong>Shift Signup:</strong> Click on any date to view shift details and sign up.
-              <br />
-              <span style={{ fontSize: '14px', color: '#666' }}>
-                🔴 Red = No volunteers | 🟡 Yellow = Needs more volunteers | No color = Fully staffed
-                <br />
-                Note: Your first shift must be supervised by a committee member.
-              </span>
-            </>
-          ) : (
-            <>
-              <strong>Shift Signup:</strong> Click on any date to view shift details and sign up.
-              <br />
-              <span style={{ fontSize: '14px', color: '#666' }}>
-                🔴 Red = No volunteers | 🟡 Yellow = Needs more volunteers | No color = Fully staffed
-              </span>
-            </>
-          )}
-        </div>
+  return (
+    <Page
+      size="full"
+      title="Events Calendar"
+      titleAction={
+        <Button asChild variant="outline" size="sm">
+          <a href={`webcal://${window.location.host}/api/events/calendar.ics`}>
+            📅 Subscribe
+          </a>
+        </Button>
+      }
+    >
+      {loggedIn && userStatus && (
+        <CalendarLegendPopup userStatus={userStatus} />
       )}
 
       {eventsLoading ? (
         <div style={{ padding: '40px', textAlign: 'center' }}>Loading events...</div>
       ) : (
-        <EventsCalendar
+        <ShiftSlotCalendar
+          shifts={loggedIn ? shifts : []}
           events={events}
-          shifts={isLoggedIn() ? shifts : undefined}
-          userStatus={userStatus}
           termWeeks={termWeeks}
           inductionDates={inductionDates.length > 0 ? inductionDates : undefined}
-          onDateClick={isLoggedIn() ? handleDateClick : undefined}
-          onSelectEvent={(event) => handleDateClick(event.start)}
-          defaultDate={new Date()}
-          defaultView="month"
+          viewerContext={viewerContext}
+          fromDate={fromDate}
+          toDate={toDate}
+          selected={selectedDate}
+          onSelect={(d) => {
+            if (loggedIn) handleDateClick(d)
+          }}
         />
       )}
 
@@ -317,7 +362,7 @@ function EventsPage() {
         onClose={handleCloseModal}
         onUpdate={handleShiftUpdate}
       />
-    </main>
+    </Page>
   )
 }
 

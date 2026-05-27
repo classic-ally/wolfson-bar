@@ -39,10 +39,15 @@ async fn main() {
     // Initialize tracing
     tracing_subscriber::fmt::init();
 
-    // Setup database (create if it doesn't exist)
+    // Setup database (create if it doesn't exist). Path is env-driven so the
+    // server, launch scripts, and seed script all agree regardless of cwd.
+    let db_path = std::env::var("DATABASE_PATH")
+        .unwrap_or_else(|_| "wolfson_bar.db".to_string());
+    let db_url = format!("sqlite:{}?mode=rwc", db_path);
+    tracing::info!("Opening database at {}", db_path);
     let db = SqlitePoolOptions::new()
         .max_connections(5)
-        .connect("sqlite:wolfson_bar.db?mode=rwc")
+        .connect(&db_url)
         .await
         .expect("Failed to connect to database");
 

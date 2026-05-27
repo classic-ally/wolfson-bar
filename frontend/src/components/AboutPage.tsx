@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { usePageTitle } from '../hooks/usePageTitle'
+import Page from './Page'
 
 type TabType = 'about' | 'rota' | 'barco'
 
@@ -8,7 +9,7 @@ export default function AboutPage() {
   usePageTitle('About')
 
   return (
-    <main className="content" style={{ maxWidth: '1200px', margin: '0 auto', padding: '40px 20px' }}>
+    <Page size="wide">
       <div style={{ borderBottom: '2px solid #e0e0e0', marginBottom: '30px', overflowX: 'auto', overflowY: 'hidden' }}>
         <div style={{ display: 'flex', gap: '0', minWidth: 'max-content' }}>
           <button
@@ -102,6 +103,6 @@ export default function AboutPage() {
           </p>
         </div>
       )}
-    </main>
+    </Page>
   )
 }

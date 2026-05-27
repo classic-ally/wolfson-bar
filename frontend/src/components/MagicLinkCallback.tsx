@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
+import Page from './Page'
 
 export default function MagicLinkCallback() {
   const [searchParams] = useSearchParams()
@@ -30,30 +31,34 @@ export default function MagicLinkCallback() {
 
   if (error) {
     return (
-      <div style={{ maxWidth: '500px', margin: '100px auto', padding: '30px', textAlign: 'center' }}>
-        <h2 style={{ color: '#dc3545' }}>Sign-in Failed</h2>
-        <p style={{ color: '#666' }}>{error}</p>
-        <button
-          onClick={() => navigate('/')}
-          style={{
-            padding: '10px 20px',
-            backgroundColor: '#8B0000',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-          }}
-        >
-          Go Home
-        </button>
-      </div>
+      <Page size="narrow">
+        <div style={{ textAlign: 'center' }}>
+          <h2 style={{ color: '#dc3545' }}>Sign-in Failed</h2>
+          <p style={{ color: '#666' }}>{error}</p>
+          <button
+            onClick={() => navigate('/')}
+            style={{
+              padding: '10px 20px',
+              backgroundColor: '#8B0000',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+            }}
+          >
+            Go Home
+          </button>
+        </div>
+      </Page>
     )
   }
 
   return (
-    <div style={{ maxWidth: '500px', margin: '100px auto', padding: '30px', textAlign: 'center' }}>
-      <h2>Signing you in...</h2>
-      <p style={{ color: '#666' }}>Please wait while we complete your sign-in.</p>
-    </div>
+    <Page size="narrow">
+      <div style={{ textAlign: 'center' }}>
+        <h2>Signing you in...</h2>
+        <p style={{ color: '#666' }}>Please wait while we complete your sign-in.</p>
+      </div>
+    </Page>
   )
 }

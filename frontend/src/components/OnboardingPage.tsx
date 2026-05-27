@@ -3,6 +3,7 @@ import { getUserStatus, acceptCodeOfConduct, uploadCertificate, updateDisplayNam
 import type { UserStatus } from '../types/UserStatus'
 import type { InductionDate } from '../types/InductionDate'
 import CodeOfConduct from './CodeOfConduct'
+import Page from './Page'
 
 export default function OnboardingPage() {
   const [status, setStatus] = useState<UserStatus | null>(null)
@@ -219,8 +220,7 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div style={{ maxWidth: '800px', margin: '40px auto', padding: '20px' }}>
-      <h1>My Profile</h1>
+    <Page size="default" title="My Profile">
 
       {/* User Details Section */}
       <div style={{
@@ -764,6 +764,6 @@ export default function OnboardingPage() {
         onOpenChange={setShowCocReadOnly}
         readOnly
       />
-    </div>
+    </Page>
   )
 }

@@ -1,4 +1,5 @@
 import { usePageTitle } from '../hooks/usePageTitle'
+import Page from './Page'
 
 export default function MenuPage() {
   usePageTitle('Menu')
@@ -20,8 +21,7 @@ export default function MenuPage() {
   }
 
   return (
-    <main className="content" style={{ maxWidth: '800px', margin: '0 auto', padding: '40px 20px' }}>
-      <h1>Bar Menu</h1>
+    <Page size="default" title="Bar Menu">
       <p style={{ ...textStyle, marginBottom: '32px' }}>
         We offer a wide selection of drinks to suit every taste.
       </p>
@@ -66,6 +66,6 @@ export default function MenuPage() {
       <p style={{ ...textStyle, marginTop: '32px', fontStyle: 'italic' }}>
         Whether you're after a classic pint or something new to try, there's something here for everyone.
       </p>
-    </main>
+    </Page>
   )
 }

@@ -130,6 +130,7 @@
               ExposedPorts."3000/tcp" = {};
               Env = [
                 "FRONTEND_PATH=${runtime}/frontend/dist"
+                "DATABASE_PATH=/var/lib/wolfson-bar/wolfson_bar.db"
               ];
               WorkingDir = "${runtime}";
             };
@@ -172,6 +173,7 @@
               environment = {
                 PUBLIC_URL = cfg.publicUrl;
                 FRONTEND_PATH = "${runtime}/frontend/dist";
+                DATABASE_PATH = "${cfg.stateDir}/wolfson_bar.db";
               };
 
               serviceConfig = {
@@ -208,8 +210,20 @@
           PUBLIC_URL = "http://localhost:5173";
 
           shellHook = ''
+            # Pin the SQLite path to the repo root so cwd can't accidentally
+            # spawn a second DB file. Override DATABASE_PATH before entering
+            # the shell if you need a different location.
+            export DATABASE_PATH="''${DATABASE_PATH:-$PWD/wolfson_bar.db}"
+
+            # Expose backend/bin/* on PATH so dev helpers (magic-link, etc.)
+            # are one command away from anywhere in the repo. Scripts read
+            # $DATABASE_PATH for the DB location.
+            export PATH="$PWD/backend/bin:$PATH"
+
             echo "🍺 Wolfson Bar Development Environment"
-            echo "📍 PUBLIC_URL: $PUBLIC_URL"
+            echo "📍 PUBLIC_URL:    $PUBLIC_URL"
+            echo "📂 DATABASE_PATH: $DATABASE_PATH"
+            echo "🔑 magic-link <name|email>  — mint a 15-min login URL"
             echo ""
             echo "Backend:  cd backend && cargo run"
             echo "Frontend: cd frontend && pnpm dev"

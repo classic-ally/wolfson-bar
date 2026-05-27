@@ -8,7 +8,7 @@ export default function Footer() {
 
   return (
     <footer className="mt-auto border-t border-border bg-muted/40">
-      <div className="mx-auto flex max-w-5xl flex-col gap-3 px-6 py-6 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 px-6 py-6 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-col gap-1">
           <span>© {year} Wolfson Cellar Bar</span>
           <span className="text-xs">

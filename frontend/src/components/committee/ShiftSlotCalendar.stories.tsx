@@ -333,3 +333,91 @@ export const Tablet: Story = {
     onSelect: () => {},
   },
 }
+
+// Two paid evenings — driven by ShiftInfo.requires_contract. The amber £ badge
+// should appear on those cells (mirrors how the calendar would call out paid
+// events like Halfway Hall / Bops to non-committee members).
+const fixtureShiftsWithPaid: ShiftInfo[] = fixtureShifts.map((s) =>
+  s.date === '2026-05-15' || s.date === '2026-05-22'
+    ? { ...s, requires_contract: true }
+    : s,
+)
+
+export const PaidEvents: Story = {
+  render: () => (
+    <Wrapper shifts={fixtureShiftsWithPaid} events={fixtureEvents} />
+  ),
+  args: {
+    shifts: fixtureShiftsWithPaid,
+    events: fixtureEvents,
+    fromDate,
+    toDate,
+    onSelect: () => {},
+  },
+}
+
+// Public / signed-out browsing — no userStatus, no existing-shift highlights,
+// no manager affordances. Mirrors how the /events page renders for visitors.
+const wideFrom = new Date('2026-01-01')
+const wideTo = new Date('2026-12-31')
+
+export const PublicView: Story = {
+  render: () => {
+    const [selected, setSelected] = useState<Date | undefined>(undefined)
+    return (
+      <div className="space-y-4">
+        <ShiftSlotCalendar
+          shifts={fixtureShiftsWithPaid}
+          events={fixtureEvents}
+          termWeeks={fixtureTermWeeks}
+          inductionDates={fixtureInductionDates}
+          viewerContext={{ kind: 'public' }}
+          fromDate={wideFrom}
+          toDate={wideTo}
+          selected={selected}
+          onSelect={setSelected}
+        />
+        <p className="text-sm text-muted-foreground">
+          Selected:{' '}
+          {selected
+            ? `${selected.getFullYear()}-${String(selected.getMonth() + 1).padStart(2, '0')}-${String(selected.getDate()).padStart(2, '0')}`
+            : '(none)'}
+        </p>
+      </div>
+    )
+  },
+  args: {
+    shifts: fixtureShiftsWithPaid,
+    events: fixtureEvents,
+    fromDate: wideFrom,
+    toDate: wideTo,
+    onSelect: () => {},
+  },
+}
+
+export const PublicViewMobile: Story = {
+  render: () => {
+    const [selected, setSelected] = useState<Date | undefined>(undefined)
+    return (
+      <ShiftSlotCalendar
+        shifts={fixtureShiftsWithPaid}
+        events={fixtureEvents}
+        termWeeks={fixtureTermWeeks}
+        inductionDates={fixtureInductionDates}
+        viewerContext={{ kind: 'self', userStatus: null }}
+        fromDate={wideFrom}
+        toDate={wideTo}
+        selected={selected}
+        onSelect={setSelected}
+      />
+    )
+  },
+  globals: { viewport: { value: 'iphone14', isRotated: false } },
+  args: {
+    shifts: fixtureShiftsWithPaid,
+    events: fixtureEvents,
+    fromDate: wideFrom,
+    toDate: wideTo,
+    onSelect: () => {},
+  },
+}

@@ -19,6 +19,11 @@ export default defineConfig({
     }
   },
   server: {
+    // Pin the dev port so backend PUBLIC_URL and WebAuthn rp_origin (both
+    // expect :5173) keep matching. strictPort fails fast instead of silently
+    // bumping to 5174 — fix the conflict rather than chase a moving target.
+    port: 5173,
+    strictPort: true,
     // Fallback to index.html for client-side routing
     historyApiFallback: true,
     // Proxy API requests to backend

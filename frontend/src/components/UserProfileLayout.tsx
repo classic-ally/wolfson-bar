@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom'
 import { isLoggedIn } from '../lib/auth'
 import { Navigate } from 'react-router-dom'
 import UserProfileNav from './UserProfileNav'
+import Page from './Page'
 
 export default function UserProfileLayout() {
   if (!isLoggedIn()) {
@@ -9,10 +10,9 @@ export default function UserProfileLayout() {
   }
 
   return (
-    <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
-      <h1 style={{ marginBottom: '10px' }}>My Profile</h1>
+    <Page size="wide" title="My Profile">
       <UserProfileNav />
       <Outlet />
-    </div>
+    </Page>
   )
 }

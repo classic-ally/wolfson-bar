@@ -1,12 +1,11 @@
 import { usePageTitle } from '../hooks/usePageTitle'
+import Page from './Page'
 
 export default function PrivacyPage() {
   usePageTitle('Privacy Notice')
 
   return (
-    <main className="content" style={{ maxWidth: '800px', margin: '40px auto', padding: '20px' }}>
-      <h1>Privacy Notice</h1>
-
+    <Page size="default" title="Privacy Notice">
       <div style={{ lineHeight: 1.8, color: '#333' }}>
         <h2>What we collect</h2>
         <p>When you create an account, we store:</p>
@@ -61,6 +60,6 @@ export default function PrivacyPage() {
           Data Protection Officer through the college's main office.
         </p>
       </div>
-    </main>
+    </Page>
   )
 }
