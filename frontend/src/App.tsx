@@ -29,6 +29,7 @@ import PasskeyNudgeBanner from './components/PasskeyNudgeBanner'
 import ProtectedRoute from './components/ProtectedRoute'
 import MagicLinkCallback from './components/MagicLinkCallback'
 import PrivacyPage from './components/PrivacyPage'
+import Footer from './components/Footer'
 import { isLoggedIn, isCommittee, getEvents, getShifts, getUserStatus, getTermWeeks, TermWeek, getInductionDates } from './lib/auth'
 import type { Event } from './types/Event'
 import type { ShiftInfo } from './types/ShiftInfo'
@@ -360,6 +361,7 @@ function App() {
             <Route path="import" element={<AdminBulkImport />} />
           </Route>
         </Routes>
+        <Footer />
       </div>
     </BrowserRouter>
   )

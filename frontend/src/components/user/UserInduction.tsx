@@ -161,10 +161,6 @@ export default function UserInduction() {
     return <div style={{ padding: '40px', textAlign: 'center' }}>Error loading status</div>
   }
 
-  if (showCoc) {
-    return <CodeOfConduct onAccept={handleCocAccept} onDecline={handleCocDecline} />
-  }
-
   if (showQR && qrDataUrl) {
     return (
       <div style={{ maxWidth: '500px', margin: '40px auto', padding: '20px', textAlign: 'center' }}>
@@ -474,6 +470,13 @@ export default function UserInduction() {
           )}
         </div>
       </div>
+
+      <CodeOfConduct
+        open={showCoc}
+        onOpenChange={setShowCoc}
+        onAccept={handleCocAccept}
+        onDecline={handleCocDecline}
+      />
     </div>
   )
 }

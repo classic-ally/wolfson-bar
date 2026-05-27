@@ -1,5 +1,15 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
 
 const cocContent = `# Wolfson Cellar Bar - Code of Conduct
 
@@ -63,107 +73,113 @@ BarCo asks that all Rota members read and abide by this Code of Conduct while wo
 `
 
 interface CodeOfConductProps {
-  onAccept: () => void
-  onDecline: () => void
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  /** When set, modal hides the accept/decline flow and just lets the user re-read. */
+  readOnly?: boolean
+  onAccept?: () => void
+  onDecline?: () => void
 }
 
-export default function CodeOfConduct({ onAccept, onDecline }: CodeOfConductProps) {
+export default function CodeOfConduct({
+  open,
+  onOpenChange,
+  readOnly = false,
+  onAccept,
+  onDecline,
+}: CodeOfConductProps) {
   const [agreed, setAgreed] = useState(false)
   const [hasScrolledToBottom, setHasScrolledToBottom] = useState(false)
 
+  useEffect(() => {
+    if (!open) {
+      setAgreed(false)
+      setHasScrolledToBottom(false)
+    }
+  }, [open])
+
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const element = e.currentTarget
-    const isAtBottom = element.scrollHeight - element.scrollTop <= element.clientHeight + 10
-    if (isAtBottom) {
+    const el = e.currentTarget
+    if (el.scrollHeight - el.scrollTop <= el.clientHeight + 10) {
       setHasScrolledToBottom(true)
     }
   }
 
+  // In the accept flow, block ESC / outside-click — the user must explicitly
+  // accept or decline. In read-only mode, normal close behaviour is fine.
+  const blockClose = (e: Event) => {
+    if (!readOnly) e.preventDefault()
+  }
+
   return (
-    <div style={{
-      maxWidth: '800px',
-      margin: '40px auto',
-      padding: '20px',
-      backgroundColor: 'white',
-      borderRadius: '8px',
-      boxShadow: '0 2px 10px rgba(0,0,0,0.1)'
-    }}>
-      <div
-        onScroll={handleScroll}
-        style={{
-          maxHeight: '60vh',
-          overflow: 'auto',
-          padding: '20px',
-          border: '1px solid #ddd',
-          borderRadius: '4px',
-          marginBottom: '20px',
-          backgroundColor: '#fafafa'
-        }}
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="sm:max-w-3xl flex max-h-[90vh] flex-col gap-4"
+        showCloseButton={readOnly}
+        onEscapeKeyDown={blockClose}
+        onPointerDownOutside={blockClose}
+        onInteractOutside={blockClose}
+        aria-describedby={readOnly ? undefined : 'coc-description'}
       >
-        <ReactMarkdown>{cocContent}</ReactMarkdown>
-      </div>
+        <DialogHeader>
+          <DialogTitle>Code of Conduct</DialogTitle>
+          {!readOnly && (
+            <DialogDescription id="coc-description">
+              Please read the full Code of Conduct, then confirm your agreement to continue.
+            </DialogDescription>
+          )}
+        </DialogHeader>
 
-      {!hasScrolledToBottom && (
-        <div style={{
-          textAlign: 'center',
-          color: '#666',
-          marginBottom: '10px',
-          fontSize: '14px'
-        }}>
-          ↓ Please scroll to the bottom to continue ↓
+        <div
+          onScroll={handleScroll}
+          className="coc-markdown flex-1 min-h-0 overflow-y-auto rounded-md border border-border bg-muted/30 p-4 text-sm leading-relaxed"
+        >
+          <ReactMarkdown>{cocContent}</ReactMarkdown>
         </div>
-      )}
 
-      <div style={{ marginBottom: '20px' }}>
-        <label style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          cursor: hasScrolledToBottom ? 'pointer' : 'not-allowed',
-          opacity: hasScrolledToBottom ? 1 : 0.5
-        }}>
-          <input
-            type="checkbox"
-            checked={agreed}
-            onChange={(e) => setAgreed(e.target.checked)}
-            disabled={!hasScrolledToBottom}
-            style={{ width: '20px', height: '20px' }}
-          />
-          <span>
-            I confirm that I have read, understood, and agree to abide by the above Code of Conduct
-          </span>
-        </label>
-      </div>
+        {!readOnly && !hasScrolledToBottom && (
+          <p className="text-center text-xs text-muted-foreground">
+            ↓ Scroll to the bottom to continue ↓
+          </p>
+        )}
 
-      <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-        <button
-          onClick={onDecline}
-          style={{
-            padding: '10px 30px',
-            backgroundColor: '#666',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer'
-          }}
-        >
-          Decline
-        </button>
-        <button
-          onClick={onAccept}
-          disabled={!agreed}
-          style={{
-            padding: '10px 30px',
-            backgroundColor: agreed ? '#8B0000' : '#ccc',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: agreed ? 'pointer' : 'not-allowed'
-          }}
-        >
-          Accept and Continue
-        </button>
-      </div>
-    </div>
+        {!readOnly && (
+          <label
+            className={cn(
+              'flex items-center gap-3 text-sm',
+              hasScrolledToBottom ? 'cursor-pointer' : 'cursor-not-allowed opacity-50',
+            )}
+          >
+            <input
+              type="checkbox"
+              checked={agreed}
+              onChange={(e) => setAgreed(e.target.checked)}
+              disabled={!hasScrolledToBottom}
+              className="h-4 w-4 accent-primary"
+            />
+            <span>
+              I confirm that I have read, understood, and agree to abide by the above Code of Conduct.
+            </span>
+          </label>
+        )}
+
+        <DialogFooter>
+          {readOnly ? (
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              Close
+            </Button>
+          ) : (
+            <>
+              <Button variant="outline" onClick={onDecline}>
+                Decline
+              </Button>
+              <Button onClick={onAccept} disabled={!agreed}>
+                Accept and Continue
+              </Button>
+            </>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

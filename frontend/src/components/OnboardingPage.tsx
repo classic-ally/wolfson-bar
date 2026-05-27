@@ -8,6 +8,7 @@ export default function OnboardingPage() {
   const [status, setStatus] = useState<UserStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [showCoc, setShowCoc] = useState(false)
+  const [showCocReadOnly, setShowCocReadOnly] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [editingName, setEditingName] = useState(false)
   const [newDisplayName, setNewDisplayName] = useState('')
@@ -208,10 +209,6 @@ export default function OnboardingPage() {
 
   if (!status) {
     return <div style={{ padding: '40px', textAlign: 'center' }}>Error loading status</div>
-  }
-
-  if (showCoc) {
-    return <CodeOfConduct onAccept={handleCocAccept} onDecline={handleCocDecline} />
   }
 
   const isFullyOnboarded = isRotaMember(status)
@@ -549,7 +546,23 @@ export default function OnboardingPage() {
             </button>
           )}
           {status.code_of_conduct_signed && (
-            <span style={{ color: '#0066cc', fontSize: '14px' }}>Completed ✓</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ color: '#0066cc', fontSize: '14px' }}>Completed ✓</span>
+              <button
+                onClick={() => setShowCocReadOnly(true)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#0066cc',
+                  textDecoration: 'underline',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  padding: 0,
+                }}
+              >
+                View Code of Conduct
+              </button>
+            </div>
           )}
         </div>
 
@@ -739,6 +752,18 @@ export default function OnboardingPage() {
           </div>
         )}
       </div>
+
+      <CodeOfConduct
+        open={showCoc}
+        onOpenChange={setShowCoc}
+        onAccept={handleCocAccept}
+        onDecline={handleCocDecline}
+      />
+      <CodeOfConduct
+        open={showCocReadOnly}
+        onOpenChange={setShowCocReadOnly}
+        readOnly
+      />
     </div>
   )
 }

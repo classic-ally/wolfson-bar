@@ -144,3 +144,25 @@ body {
     @apply font-sans;
   }
 }
+
+.coc-markdown h1 {
+  @apply text-xl font-semibold mt-0 mb-3;
+}
+.coc-markdown h2 {
+  @apply text-lg font-semibold mt-5 mb-2;
+}
+.coc-markdown p {
+  @apply mb-3;
+}
+.coc-markdown ul {
+  @apply list-disc pl-6 mb-3 space-y-1;
+}
+.coc-markdown ul ul {
+  @apply mt-1 mb-0;
+}
+.coc-markdown strong {
+  @apply font-semibold text-foreground;
+}
+.coc-markdown hr {
+  @apply my-4 border-border;
+}
