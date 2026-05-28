@@ -15,6 +15,7 @@ import CommitteeStockUpdate from './components/committee/CommitteeStockUpdate'
 import CommitteeMembers from './components/committee/CommitteeMembers'
 import CommitteeInduction from './components/committee/CommitteeInduction'
 import CommitteeRotaManager from './components/committee/CommitteeRotaManager'
+import CommitteeExport from './components/committee/CommitteeExport'
 import OnboardingStatusBar from './components/OnboardingStatusBar'
 import UserProfileLayout from './components/UserProfileLayout'
 import UserOverview from './components/user/UserOverview'
@@ -400,6 +401,7 @@ function App() {
             <Route path="members" element={<CommitteeMembers />} />
             <Route path="induction" element={<CommitteeInduction />} />
             <Route path="rotamanager" element={<CommitteeRotaManager />} />
+            <Route path="export" element={<CommitteeExport />} />
           </Route>
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<AdminUsers />} />

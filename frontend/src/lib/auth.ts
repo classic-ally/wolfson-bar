@@ -403,6 +403,34 @@ export async function getActiveMembers(): Promise<ActiveMember[]> {
   return response.json()
 }
 
+export type ExportReportKey = 'members' | 'shift-history'
+
+/**
+ * Download a committee data export as a CSV. Fetches the blob with an auth
+ * header (which a plain <a href> can't do) and triggers a browser download
+ * using the server-provided Content-Disposition filename.
+ */
+export async function downloadExport(reportKey: ExportReportKey): Promise<void> {
+  const response = await authenticatedFetch(
+    `${API_BASE}/api/admin/exports/${reportKey}.csv`,
+  )
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => '')
+    throw new AuthError(message || `Failed to download ${reportKey} export`)
+  }
+
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = ''
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 import type { UnallocatedMember } from '../types/UnallocatedMember'
 export type { UnallocatedMember }
 

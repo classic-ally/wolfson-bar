@@ -14,6 +14,9 @@ use crate::auth::{CommitteeUser, AdminUser};
 use crate::models::{ErrorResponse, User, IS_ROTA_MEMBER_SQL};
 use crate::routes::auth::{AppState, create_user_in_db};
 
+mod exports;
+pub use exports::{export_members_csv, export_shift_history_csv};
+
 #[derive(Debug, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct PendingCertificate {
@@ -1671,4 +1674,5 @@ mod tests {
         assert_eq!(status, Status::UNAUTHORIZED);
         assert_eq!(stored_type(&state, &target.id).await, None);
     }
+
 }
