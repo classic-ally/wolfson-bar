@@ -70,7 +70,7 @@
               hash = "sha256-4QTn9EyyXoLxjgBw+y/Tymxo6uANb3n10Gkxle7FMFQ=";
             };
 
-            nativeBuildInputs = [ pkgs.nodejs pkgs.pnpm_10 pkgs.pnpmConfigHook ];
+            nativeBuildInputs = [ pkgs.nodejs pkgs.pnpm pkgs.pnpmConfigHook ];
 
             preBuild = ''
               mkdir -p src/types
