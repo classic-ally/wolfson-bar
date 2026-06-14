@@ -12,6 +12,7 @@ const MIGRATIONS: &[(&str, &str, &[&str])] = &[
     ("009_optional_passkey", include_str!("../migrations/009_optional_passkey.sql"), &["already exists"]),
     ("010_induction", include_str!("../migrations/010_induction.sql"), &["duplicate column", "already exists"]),
     ("011_backfill_certificate_type", include_str!("../migrations/011_backfill_certificate_type.sql"), &[]),
+    ("012_kiosk", include_str!("../migrations/012_kiosk.sql"), &["duplicate column", "already exists"]),
 ];
 
 pub async fn run_migrations(db: &SqlitePool) {

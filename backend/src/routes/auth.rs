@@ -82,6 +82,9 @@ pub struct AppState {
     pub db: SqlitePool,
     pub webauthn: Webauthn,
     pub jwt_secret: Vec<u8>,
+    /// Persistent secret for kiosk check-in TOTP codes. Unlike jwt_secret this
+    /// is loaded from app_config so rotating codes survive backend restarts.
+    pub kiosk_secret: Vec<u8>,
     pub email_service: Option<crate::email::EmailService>,
     pub public_url: String,
 }

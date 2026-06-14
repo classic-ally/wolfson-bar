@@ -20,6 +20,7 @@ use routes::users::{get_me, accept_coc, upload_certificate, get_verification_tok
 use routes::magic_link::{request_magic_link, verify_magic_link};
 use routes::admin::{get_pending_certificates, get_certificate, approve_certificate, verify_induction, get_active_members, get_unallocated_users, get_pending_contracts, approve_contract, get_bar_hours, update_bar_hours, get_overview_stats, get_all_users, promote_user, demote_user, delete_user, admin_mark_induction, admin_mark_coc, bulk_import_users, admin_upload_certificate, admin_set_contract, admin_clear_contract, admin_set_email, export_members_csv, export_shift_history_csv};
 use routes::induction::{set_induction_availability, remove_induction_availability, get_induction_dates, signup_for_induction, cancel_induction_signup, admin_mark_supervised, get_pending_induction_approvals};
+use routes::kiosk::{pair_start, pair_approve, pair_status, list_devices, revoke_device, get_checkin_code, check_in, get_bar_status, close_bar};
 use routes::events::{get_events, get_event, create_event, update_event, delete_event};
 use routes::shifts::{get_shifts, signup_for_shift, cancel_shift_signup, get_my_shifts, admin_assign_to_shift, admin_remove_from_shift};
 use routes::calendar::{get_calendar_feed, download_event, get_user_calendar};
@@ -67,6 +68,10 @@ async fn main() {
     let jwt_secret: Vec<u8> = rand::thread_rng().gen::<[u8; 32]>().to_vec();
     tracing::info!("Generated random JWT secret for this session");
 
+    // Persistent kiosk TOTP secret: env override, else DB-backed (generated once
+    // and stored) so kiosk check-in codes survive restarts.
+    let kiosk_secret = routes::kiosk::load_or_create_kiosk_secret(&db).await;
+
     // Initialize email service (optional - app works without it)
     let email_service = email::EmailService::new();
     if email_service.is_some() {
@@ -80,6 +85,7 @@ async fn main() {
         db,
         webauthn,
         jwt_secret,
+        kiosk_secret,
         email_service: email_service.clone(),
         public_url: public_url.clone(),
     };
@@ -170,6 +176,16 @@ async fn main() {
         .route("/api/shifts/:date/induction-signup", post(signup_for_induction).delete(cancel_induction_signup))
         .route("/api/admin/users/:user_id/mark-supervised", post(admin_mark_supervised))
         .route("/api/admin/pending-inductions", get(get_pending_induction_approvals))
+        // Kiosk shift check-in
+        .route("/api/kiosk/pair/start", post(pair_start))
+        .route("/api/kiosk/pair/approve", post(pair_approve))
+        .route("/api/kiosk/pair/status", get(pair_status))
+        .route("/api/kiosk/devices", get(list_devices))
+        .route("/api/kiosk/devices/:device_id/revoke", post(revoke_device))
+        .route("/api/kiosk/checkin-code", get(get_checkin_code))
+        .route("/api/shifts/check-in", post(check_in))
+        .route("/api/bar-status", get(get_bar_status))
+        .route("/api/bar-status/close", post(close_bar))
         ;
         // Debug-only endpoint for generating JWTs for any user
         #[cfg(debug_assertions)]
