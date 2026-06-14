@@ -899,13 +899,13 @@ pub async fn delete_user(
     Ok(StatusCode::OK)
 }
 
-/// Mark a user's induction as complete (admin only)
+/// Mark a user's induction as complete (committee members approve their own inductees)
 pub async fn admin_mark_induction(
     State(state): State<AppState>,
-    AdminUser(admin): AdminUser,
+    CommitteeUser(approver): CommitteeUser,
     Path(target_user_id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    info!("✅ Admin {} marking induction complete for user {}", admin.id, target_user_id);
+    info!("✅ Committee member {} marking induction complete for user {}", approver.id, target_user_id);
 
     let result = sqlx::query("UPDATE users SET induction_completed = TRUE WHERE id = ?")
         .bind(&target_user_id)
@@ -1450,6 +1450,111 @@ mod tests {
         let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let members: Vec<UnallocatedMember> = serde_json::from_slice(&body_bytes).unwrap();
         assert!(members.is_empty(), "no rota members inserted");
+    }
+
+    // -------- Induction approval auth gate (regression: must be committee, not admin) --------
+    //
+    // Committee members run induction sessions and approve their own inductees via the
+    // committee interface. These endpoints must be gated on `is_committee`, NOT `is_admin`.
+    // A prior regression required admin, so committee members hit "Admin access required".
+
+    fn induction_approval_app(state: AppState) -> Router {
+        Router::new()
+            .route(
+                "/api/admin/users/:user_id/mark-induction",
+                post(admin_mark_induction),
+            )
+            .route(
+                "/api/admin/users/:user_id/mark-supervised",
+                post(crate::routes::induction::admin_mark_supervised),
+            )
+            .with_state(state)
+    }
+
+    fn approve_request(path: &str, user_id: &str, token: Option<&str>) -> Request<Body> {
+        let mut builder = Request::builder()
+            .method("POST")
+            .uri(format!("/api/admin/users/{user_id}/{path}"));
+        if let Some(t) = token {
+            builder = builder.header("authorization", format!("Bearer {t}"));
+        }
+        builder.body(Body::empty()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn committee_member_can_mark_induction() {
+        let state = test_state().await;
+        let committee = user_with_role(true, false); // committee, NOT admin
+        insert_user(&state.db, &committee).await;
+        let token = create_jwt_token(&committee.id, &state.jwt_secret).unwrap();
+
+        // Inductee who needs approval.
+        let inductee = user_with(false, true, true, false);
+        insert_user(&state.db, &inductee).await;
+
+        let response = induction_approval_app(state.clone())
+            .oneshot(approve_request("mark-induction", &inductee.id, Some(&token)))
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            Status::OK,
+            "committee member must be able to approve inductions"
+        );
+
+        let done: bool =
+            sqlx::query_scalar("SELECT induction_completed FROM users WHERE id = ?")
+                .bind(&inductee.id)
+                .fetch_one(&state.db)
+                .await
+                .unwrap();
+        assert!(done, "induction should be marked complete");
+    }
+
+    #[tokio::test]
+    async fn committee_member_can_mark_supervised() {
+        let state = test_state().await;
+        let committee = user_with_role(true, false); // committee, NOT admin
+        insert_user(&state.db, &committee).await;
+        let token = create_jwt_token(&committee.id, &state.jwt_secret).unwrap();
+
+        let inductee = user_with(false, true, true, false);
+        insert_user(&state.db, &inductee).await;
+
+        let response = induction_approval_app(state.clone())
+            .oneshot(approve_request("mark-supervised", &inductee.id, Some(&token)))
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            Status::OK,
+            "committee member must be able to approve supervised shifts"
+        );
+
+        let done: bool =
+            sqlx::query_scalar("SELECT supervised_shift_completed FROM users WHERE id = ?")
+                .bind(&inductee.id)
+                .fetch_one(&state.db)
+                .await
+                .unwrap();
+        assert!(done, "supervised shift should be marked complete");
+    }
+
+    #[tokio::test]
+    async fn non_committee_user_cannot_mark_induction() {
+        let state = test_state().await;
+        let plain = user_with_role(false, false); // neither committee nor admin
+        insert_user(&state.db, &plain).await;
+        let token = create_jwt_token(&plain.id, &state.jwt_secret).unwrap();
+
+        let inductee = user_with(false, true, true, false);
+        insert_user(&state.db, &inductee).await;
+
+        let response = induction_approval_app(state)
+            .oneshot(approve_request("mark-induction", &inductee.id, Some(&token)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), Status::FORBIDDEN);
     }
 
     // -------- get_certificate serve-time sniff --------

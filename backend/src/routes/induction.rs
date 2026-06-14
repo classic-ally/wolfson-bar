@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, error};
 use ts_rs::TS;
 
-use crate::auth::{AuthenticatedUser, CommitteeUser, AdminUser};
+use crate::auth::{AuthenticatedUser, CommitteeUser};
 use crate::models::ErrorResponse;
 use crate::routes::auth::AppState;
 
@@ -352,13 +352,13 @@ pub async fn cancel_induction_signup(
 
 // ===== Admin: Mark Supervised Shift =====
 
-/// Mark a user's supervised shift as complete (admin only)
+/// Mark a user's supervised shift as complete (committee members approve their own inductees)
 pub async fn admin_mark_supervised(
     State(state): State<AppState>,
-    AdminUser(admin): AdminUser,
+    CommitteeUser(approver): CommitteeUser,
     Path(target_user_id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    info!("Admin {} marking supervised shift complete for user {}", admin.id, target_user_id);
+    info!("Committee member {} marking supervised shift complete for user {}", approver.id, target_user_id);
 
     let result = sqlx::query("UPDATE users SET supervised_shift_completed = TRUE WHERE id = ?")
         .bind(&target_user_id)
