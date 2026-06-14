@@ -33,6 +33,11 @@ import ProtectedRoute from './components/ProtectedRoute'
 import MagicLinkCallback from './components/MagicLinkCallback'
 import PrivacyPage from './components/PrivacyPage'
 import Footer from './components/Footer'
+import Kiosk from './components/Kiosk'
+import CheckInPage from './components/CheckInPage'
+import CommitteeKiosk from './components/committee/CommitteeKiosk'
+import CommitteeKioskPair from './components/committee/CommitteeKioskPair'
+import BarStatusBadge from './components/BarStatusBadge'
 import { isLoggedIn, isCommittee, getEvents, getShifts, getUserStatus, getTermWeeks, TermWeek, getInductionDates } from './lib/auth'
 import type { Event } from './types/Event'
 import type { ShiftInfo } from './types/ShiftInfo'
@@ -111,6 +116,10 @@ function HomePage() {
       <div className="hero-image">
         <img src="/pop-art.jpg" alt="Wolfson Bar Pop Art" className="hero-img" />
         <p className="photo-credit">Photo: George Mather</p>
+      </div>
+
+      <div style={{ textAlign: 'center', margin: '16px 0' }}>
+        <BarStatusBadge />
       </div>
 
       <div className="intro-text">
@@ -386,6 +395,8 @@ function App() {
           <Route path="/about" element={<AboutPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/auth/magic-link-callback" element={<MagicLinkCallback />} />
+          <Route path="/kiosk" element={<Kiosk />} />
+          <Route path="/checkin" element={<CheckInPage />} />
           <Route path="/profile" element={<UserProfileLayout />}>
             <Route index element={<UserOverview />} />
             <Route path="shifts" element={<UserShifts />} />
@@ -402,6 +413,8 @@ function App() {
             <Route path="induction" element={<CommitteeInduction />} />
             <Route path="rotamanager" element={<CommitteeRotaManager />} />
             <Route path="export" element={<CommitteeExport />} />
+            <Route path="kiosk" element={<CommitteeKiosk />} />
+            <Route path="kiosk/pair" element={<CommitteeKioskPair />} />
           </Route>
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<AdminUsers />} />

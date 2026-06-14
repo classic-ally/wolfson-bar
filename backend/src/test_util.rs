@@ -27,6 +27,7 @@ pub async fn test_state() -> AppState {
         db,
         webauthn,
         jwt_secret: vec![0u8; 32],
+        kiosk_secret: vec![7u8; 32],
         email_service: None,
         public_url: "http://localhost".to_string(),
     }

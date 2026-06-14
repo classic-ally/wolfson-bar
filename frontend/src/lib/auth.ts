@@ -15,6 +15,12 @@ import type { UserListItem } from '../types/UserListItem'
 import type { BulkImportResult } from '../types/BulkImportResult'
 import type { InductionDate } from '../types/InductionDate'
 import type { PendingInductionApproval } from '../types/PendingInductionApproval'
+import type { CheckinCode } from '../types/CheckinCode'
+import type { CheckInResponse } from '../types/CheckInResponse'
+import type { BarStatus } from '../types/BarStatus'
+import type { KioskDeviceInfo } from '../types/KioskDeviceInfo'
+import type { PairStartResponse } from '../types/PairStartResponse'
+import type { PairStatusResponse } from '../types/PairStatusResponse'
 
 const API_BASE = window.location.origin
 
@@ -1184,5 +1190,150 @@ export async function startPasskeySetup(): Promise<void> {
   if (!finishResponse.ok) {
     const error = await finishResponse.json()
     throw new AuthError(error.error || 'Failed to finish passkey setup')
+  }
+}
+
+// ===== Kiosk shift check-in =====
+
+// The bar PC's device token lives here. localStorage is disk-backed per browser
+// profile, so it survives power-cycles — the kiosk stays enrolled across reboots.
+const KIOSK_TOKEN_KEY = 'kiosk_token'
+
+export function getKioskToken(): string | null {
+  return localStorage.getItem(KIOSK_TOKEN_KEY)
+}
+
+export function setKioskToken(token: string): void {
+  localStorage.setItem(KIOSK_TOKEN_KEY, token)
+}
+
+export function clearKioskToken(): void {
+  localStorage.removeItem(KIOSK_TOKEN_KEY)
+}
+
+/** Random hex string from the Web Crypto RNG. */
+export function randomHex(bytes = 32): string {
+  const buf = new Uint8Array(bytes)
+  crypto.getRandomValues(buf)
+  return Array.from(buf, (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+/** sha256 hex — matches the server's `hash_token`. */
+export async function sha256Hex(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input)
+  const digest = await crypto.subtle.digest('SHA-256', data)
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+/** Device begins pairing: posts the hash of a token it generated and keeps. */
+export async function kioskPairStart(tokenHash: string): Promise<string> {
+  const response = await fetch(`${API_BASE}/api/kiosk/pair/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token_hash: tokenHash }),
+  })
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to start pairing')
+  }
+  const data: PairStartResponse = await response.json()
+  return data.code
+}
+
+/** Device polls for committee approval. */
+export async function kioskPairStatus(code: string): Promise<string> {
+  const response = await fetch(`${API_BASE}/api/kiosk/pair/status?code=${encodeURIComponent(code)}`)
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to check pairing status')
+  }
+  const data: PairStatusResponse = await response.json()
+  return data.status
+}
+
+/** A committee member approves a pending pairing (scanned from the kiosk). */
+export async function kioskPairApprove(code: string, name: string): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/kiosk/pair/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code, name: name || null }),
+  })
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to approve pairing')
+  }
+}
+
+/**
+ * Fetch the live rotating check-in code for display on an enrolled kiosk.
+ * Authenticated by the device token (X-Kiosk-Token), not a user session.
+ * Throws AuthError on 401 so the caller can fall back to re-pairing.
+ */
+export async function getKioskCode(): Promise<CheckinCode> {
+  const token = getKioskToken()
+  if (!token) {
+    throw new AuthError('Kiosk not enrolled')
+  }
+  const response = await fetch(`${API_BASE}/api/kiosk/checkin-code`, {
+    headers: { 'X-Kiosk-Token': token },
+  })
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new AuthError(error.error || 'Kiosk not enrolled')
+  }
+  return response.json()
+}
+
+export async function listKioskDevices(): Promise<KioskDeviceInfo[]> {
+  const response = await authenticatedFetch(`${API_BASE}/api/kiosk/devices`)
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to list kiosk devices')
+  }
+  return response.json()
+}
+
+export async function revokeKioskDevice(deviceId: string): Promise<void> {
+  const response = await authenticatedFetch(
+    `${API_BASE}/api/kiosk/devices/${deviceId}/revoke`,
+    { method: 'POST' },
+  )
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to revoke device')
+  }
+}
+
+/** A rota member submits a scanned code to check in and open the bar. */
+export async function checkInShift(code: string): Promise<CheckInResponse> {
+  const response = await authenticatedFetch(`${API_BASE}/api/shifts/check-in`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  })
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to check in')
+  }
+  return response.json()
+}
+
+/** Public: current bar open/closed state. */
+export async function getBarStatus(): Promise<BarStatus> {
+  const response = await fetch(`${API_BASE}/api/bar-status`)
+  if (!response.ok) {
+    throw new AuthError('Failed to fetch bar status')
+  }
+  return response.json()
+}
+
+/** Manual early close, from the committee kiosk dashboard. */
+export async function closeBar(): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/bar-status/close`, {
+    method: 'POST',
+  })
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to close bar')
   }
 }

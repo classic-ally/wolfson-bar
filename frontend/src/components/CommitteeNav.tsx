@@ -12,6 +12,7 @@ export default function CommitteeNav() {
     { path: '/committee/induction', label: 'Induction' },
     { path: '/committee/rotamanager', label: 'Rota Manager' },
     { path: '/committee/export', label: 'Export' },
+    { path: '/committee/kiosk', label: 'Kiosk' },
   ]
 
   return (
