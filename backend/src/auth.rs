@@ -126,6 +126,61 @@ impl FromRequestParts<AppState> for AdminUser {
     }
 }
 
+/// Extractor for an enrolled kiosk device, authenticated via the `X-Kiosk-Token`
+/// header. The header carries the raw device token; only its hash is stored
+/// server-side. Wholly independent of the user/committee/admin login.
+#[allow(dead_code)] // id/name are carried for handlers/logging that may use them
+pub struct KioskDevice {
+    pub id: String,
+    pub name: Option<String>,
+}
+
+#[async_trait]
+impl FromRequestParts<AppState> for KioskDevice {
+    type Rejection = (StatusCode, Json<ErrorResponse>);
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let unauthorized = || {
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(ErrorResponse {
+                    error: "Kiosk not enrolled".to_string(),
+                }),
+            )
+        };
+
+        let token = parts
+            .headers
+            .get("x-kiosk-token")
+            .and_then(|h| h.to_str().ok())
+            .ok_or_else(unauthorized)?;
+        let hash = crate::routes::kiosk::hash_token(token);
+
+        let row = sqlx::query_as::<_, (String, Option<String>)>(
+            "SELECT id, name FROM kiosk_devices WHERE token_hash = ? AND revoked = 0",
+        )
+        .bind(&hash)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|_| unauthorized())?
+        .ok_or_else(unauthorized)?;
+
+        // Best-effort liveness stamp; failure here must not block the request.
+        let _ = sqlx::query("UPDATE kiosk_devices SET last_seen_at = datetime('now') WHERE id = ?")
+            .bind(&row.0)
+            .execute(&state.db)
+            .await;
+
+        Ok(KioskDevice {
+            id: row.0,
+            name: row.1,
+        })
+    }
+}
+
 /// Helper function to extract and fetch user from request
 async fn extract_user_from_request(
     parts: &Parts,
