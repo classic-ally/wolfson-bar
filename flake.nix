@@ -66,8 +66,8 @@
               pname = "wolfson-bar-frontend";
               version = "0.1.0";
               src = ./frontend;
-              fetcherVersion = 3;
-              hash = "sha256-4QTn9EyyXoLxjgBw+y/Tymxo6uANb3n10Gkxle7FMFQ=";
+              fetcherVersion = 4;
+              hash = "sha256-fqzPogGtDPzBOznRIk4P+5DvXVAfM0mpNp9kmGhdCjQ=";
             };
 
             nativeBuildInputs = [ pkgs.nodejs pkgs.pnpm pkgs.pnpmConfigHook ];
