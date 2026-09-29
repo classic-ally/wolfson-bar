@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getUserStatus, acceptCodeOfConduct, uploadCertificate, getInductionDates, signupForInduction, cancelInductionSignup, getVerificationToken, canSignupForShifts, isRotaMember } from '../../lib/auth'
+import { getUserStatus, uploadCertificate, getInductionDates, signupForInduction, cancelInductionSignup, getVerificationToken, canSignupForShifts, isRotaMember, needsCocResign } from '../../lib/auth'
 import type { UserStatus } from '../../types/UserStatus'
 import type { InductionDate } from '../../types/InductionDate'
 import { usePageTitle } from '../../hooks/usePageTitle'
@@ -58,15 +58,9 @@ export default function UserInduction() {
     }
   }
 
-  const handleCocAccept = async () => {
-    try {
-      await acceptCodeOfConduct()
-      setShowCoc(false)
-      loadStatus()
-    } catch (err) {
-      console.error('Failed to accept CoC:', err)
-      alert('Failed to accept Code of Conduct. Please try again.')
-    }
+  const handleCocAccept = () => {
+    setShowCoc(false)
+    loadStatus()
   }
 
   const handleCocDecline = () => {
@@ -368,7 +362,9 @@ export default function UserInduction() {
             {status.code_of_conduct_signed ? '✅' : '☐'} Code of Conduct
           </h3>
           <p style={{ color: '#666', fontSize: '14px' }}>
-            Read and agree to the bar's code of conduct.
+            {needsCocResign(status)
+              ? "The code of conduct has been updated. Read and agree to the new version to keep booking and checking in to shifts."
+              : "Read and agree to the bar's code of conduct."}
           </p>
           {!status.code_of_conduct_signed && (
             <button

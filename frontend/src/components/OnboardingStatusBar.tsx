@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
-import { getUserStatus, isLoggedIn, isRotaMember, canSignupForShifts } from '../lib/auth'
+import { useCallback, useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
+import { getUserStatus, isLoggedIn, isRotaMember, canSignupForShifts, needsCocResign, USER_STATUS_CHANGED } from '../lib/auth'
 import type { UserStatus } from '../types/UserStatus'
 
 interface OnboardingStatusBarProps {
@@ -10,8 +11,11 @@ export default function OnboardingStatusBar({ onNavigateToOnboarding }: Onboardi
   const [status, setStatus] = useState<UserStatus | null>(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
+  const { pathname } = useLocation()
+
+  const refresh = useCallback(() => {
     if (!isLoggedIn()) {
+      setStatus(null)
       setLoading(false)
       return
     }
@@ -21,6 +25,13 @@ export default function OnboardingStatusBar({ onNavigateToOnboarding }: Onboardi
       .catch((err) => console.error('Failed to fetch user status:', err))
       .finally(() => setLoading(false))
   }, [])
+
+  // Refetch on navigation and whenever an onboarding step completes in place.
+  useEffect(refresh, [refresh, pathname])
+  useEffect(() => {
+    window.addEventListener(USER_STATUS_CHANGED, refresh)
+    return () => window.removeEventListener(USER_STATUS_CHANGED, refresh)
+  }, [refresh])
 
   if (loading || !status) return null
 
@@ -33,7 +44,7 @@ export default function OnboardingStatusBar({ onNavigateToOnboarding }: Onboardi
   }
 
   if (!status.code_of_conduct_signed) {
-    pendingTasks.push('Complete Code of Conduct')
+    pendingTasks.push(needsCocResign(status) ? 'Re-sign Updated Code of Conduct' : 'Complete Code of Conduct')
   }
 
   if (!status.food_safety_completed) {

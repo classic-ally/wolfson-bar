@@ -14,6 +14,7 @@ const MIGRATIONS: &[(&str, &str, &[&str])] = &[
     ("011_backfill_certificate_type", include_str!("../migrations/011_backfill_certificate_type.sql"), &[]),
     ("012_kiosk", include_str!("../migrations/012_kiosk.sql"), &["duplicate column", "already exists"]),
     ("013_kiosk_pairing_meta", include_str!("../migrations/013_kiosk_pairing_meta.sql"), &["duplicate column"]),
+    ("014_coc_versions", include_str!("../migrations/014_coc_versions.sql"), &["duplicate column"]),
 ];
 
 pub async fn run_migrations(db: &SqlitePool) {
@@ -129,5 +130,53 @@ mod backfill_tests {
         run_011(&db, sql).await;
         assert_eq!(ty_of(&db, "pdf-wrong").await.as_deref(), Some("application/pdf"));
         assert_eq!(ty_of(&db, "jpeg-ok").await.as_deref(), Some("image/jpeg"));
+    }
+
+    // Impact: members who signed before versioning existed must not be asked
+    // to re-sign just because the schema changed.
+    // Should: mark members who had signed as having signed version 1, seeded from the old text.
+    // Should not: give a version to members who never signed, or change anything on re-run.
+    #[tokio::test]
+    async fn migration_014_backfills_existing_signatures() {
+        let url = "sqlite:file:backfill_014_test?mode=memory&cache=shared";
+        let db = SqlitePoolOptions::new().max_connections(5).connect(url).await.unwrap();
+        for (_, sql, _) in &super::MIGRATIONS[..13] {
+            sqlx::query(sql).execute(&db).await.unwrap();
+        }
+        for (id, signed) in [("signed", true), ("unsigned", false)] {
+            sqlx::query(
+                "INSERT INTO users (id, is_committee, code_of_conduct_signed, food_safety_completed,
+                 induction_completed, has_contract, created_at) VALUES (?, 0, ?, 0, 0, 0, '')",
+            )
+            .bind(id)
+            .bind(signed)
+            .execute(&db)
+            .await
+            .unwrap();
+        }
+
+        super::run_migrations(&db).await;
+        super::run_migrations(&db).await;
+
+        let versions: Vec<(String, Option<i64>)> =
+            sqlx::query_as("SELECT id, code_of_conduct_version FROM users ORDER BY id")
+                .fetch_all(&db)
+                .await
+                .unwrap();
+        assert_eq!(
+            versions,
+            vec![("signed".to_string(), Some(1)), ("unsigned".to_string(), None)]
+        );
+        let body: String = sqlx::query_scalar("SELECT body FROM coc_versions WHERE version = 1")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+        assert!(body.starts_with("# Wolfson Cellar Bar - Code of Conduct"));
+        assert!(body.contains("Members' Understanding"));
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM coc_versions")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
     }
 }

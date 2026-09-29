@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { canSignupForShifts, isRotaMember, downloadExport } from './auth'
+import {
+  acceptCodeOfConduct,
+  canSignupForShifts,
+  downloadExport,
+  isRotaMember,
+  needsCocResign,
+  USER_STATUS_CHANGED,
+} from './auth'
 
 type PredicateInput = Parameters<typeof canSignupForShifts>[0]
 
@@ -33,6 +40,16 @@ describe('canSignupForShifts', () => {
 
   it('blocks when food safety is missing', () => {
     expect(canSignupForShifts(userWith(true, true, false, false))).toBe(false)
+  })
+})
+
+describe('needsCocResign', () => {
+  // Should: ask members who signed an earlier version to re-sign.
+  // Should not: treat members who never signed as re-signing.
+  it('is true only for members whose earlier signature was reset', () => {
+    expect(needsCocResign({ code_of_conduct_signed: false, code_of_conduct_version: 1 })).toBe(true)
+    expect(needsCocResign({ code_of_conduct_signed: false, code_of_conduct_version: null })).toBe(false)
+    expect(needsCocResign({ code_of_conduct_signed: true, code_of_conduct_version: 2 })).toBe(false)
   })
 })
 
@@ -171,5 +188,37 @@ describe('downloadExport', () => {
 
     // Every created URL was revoked — no leaks.
     expect(revokedUrls).toEqual(createdUrls)
+  })
+})
+
+describe('acceptCodeOfConduct', () => {
+  beforeEach(() => localStorage.setItem('auth_token', 'test-token'))
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    localStorage.clear()
+  })
+
+  async function acceptWith(status: number) {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(status === 200 ? null : '{}', { status })))
+    const listener = vi.fn()
+    window.addEventListener(USER_STATUS_CHANGED, listener)
+    try {
+      await acceptCodeOfConduct(2).catch(() => {})
+    } finally {
+      window.removeEventListener(USER_STATUS_CHANGED, listener)
+    }
+    return listener
+  }
+
+  // Impact: the onboarding nudge bar stays mounted across pages and only
+  // refetches on this event or navigation, so a silent accept left it stale.
+  // Should: tell listeners the user's status changed once the CoC is accepted.
+  it('announces a status change after a successful accept', async () => {
+    expect(await acceptWith(200)).toHaveBeenCalledTimes(1)
+  })
+
+  // Should not: announce a status change when the server rejects the acceptance.
+  it('stays quiet when the accept is rejected', async () => {
+    expect(await acceptWith(409)).not.toHaveBeenCalled()
   })
 })

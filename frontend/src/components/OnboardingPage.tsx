@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getUserStatus, acceptCodeOfConduct, uploadCertificate, updateDisplayName, submitContractRequest, acceptPrivacy, startPasskeySetup, getInductionDates, signupForInduction, cancelInductionSignup, canSignupForShifts, isRotaMember } from '../lib/auth'
+import { getUserStatus, uploadCertificate, updateDisplayName, submitContractRequest, acceptPrivacy, startPasskeySetup, getInductionDates, signupForInduction, cancelInductionSignup, canSignupForShifts, isRotaMember } from '../lib/auth'
 import type { UserStatus } from '../types/UserStatus'
 import type { InductionDate } from '../types/InductionDate'
 import CodeOfConduct from './CodeOfConduct'
@@ -70,15 +70,9 @@ export default function OnboardingPage() {
     }
   }
 
-  const handleCocAccept = async () => {
-    try {
-      await acceptCodeOfConduct()
-      setShowCoc(false)
-      loadStatus() // Refresh status
-    } catch (err) {
-      console.error('Failed to accept CoC:', err)
-      alert('Failed to accept Code of Conduct. Please try again.')
-    }
+  const handleCocAccept = () => {
+    setShowCoc(false)
+    loadStatus()
   }
 
   const handleCocDecline = () => {

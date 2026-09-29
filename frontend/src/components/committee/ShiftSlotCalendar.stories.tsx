@@ -234,6 +234,7 @@ export const SelfViewPreInduction: Story = {
       display_name: 'New User',
       is_committee: false,
       code_of_conduct_signed: false,
+      code_of_conduct_version: null,
       food_safety_completed: false,
       has_food_safety_certificate: false,
       induction_completed: false,

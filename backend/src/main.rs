@@ -29,6 +29,7 @@ use routes::calendar::{get_calendar_feed, download_event, get_user_calendar};
 use routes::local::generate_jwt;
 use routes::stock::{create_product, lookup_barcode, add_barcode, create_transactions, get_products};
 use routes::term_weeks::get_term_weeks;
+use routes::coc::{get_current_coc, publish_coc, list_coc_versions};
 use sqlx::sqlite::SqlitePoolOptions;
 use rand::Rng;
 use std::net::SocketAddr;
@@ -167,6 +168,9 @@ async fn main() {
         .route("/api/admin/users/:user_id", axum::routing::delete(delete_user))
         .route("/api/admin/users/:user_id/mark-induction", post(admin_mark_induction))
         .route("/api/admin/users/:user_id/mark-coc", post(admin_mark_coc))
+        .route("/api/coc/current", get(get_current_coc))
+        .route("/api/admin/coc", post(publish_coc))
+        .route("/api/admin/coc/versions", get(list_coc_versions))
         .route("/api/admin/users/bulk-import", post(bulk_import_users))
         .route("/api/admin/users/:user_id/upload-certificate", post(admin_upload_certificate))
         .route("/api/admin/users/:user_id/set-contract", post(admin_set_contract))

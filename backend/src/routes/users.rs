@@ -11,6 +11,7 @@ use jsonwebtoken::{encode, EncodingKey, Header};
 
 use crate::auth::{AuthenticatedUser, Claims};
 use crate::models::ErrorResponse;
+use crate::routes::coc::{current_coc_version, record_signature};
 use crate::routes::auth::AppState;
 
 #[derive(Debug, Serialize, Deserialize, TS)]
@@ -20,6 +21,9 @@ pub struct UserStatus {
     pub display_name: Option<String>,
     pub is_committee: bool,
     pub code_of_conduct_signed: bool,
+    /// Last version signed; set but not current means "re-sign the updated CoC".
+    #[ts(type = "number | null")]
+    pub code_of_conduct_version: Option<i64>,
     pub food_safety_completed: bool,
     pub has_food_safety_certificate: bool,
     pub induction_completed: bool,
@@ -45,7 +49,9 @@ pub struct ContractRequest {
 #[derive(Debug, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct UserOverview {
-    pub next_onboarding_step: Option<String>, // "code_of_conduct", "food_safety", "induction", or null if complete
+    /// "induction", "code_of_conduct", "code_of_conduct_resign" (signed an
+    /// earlier version), "food_safety", "supervised_shift", or null if complete
+    pub next_onboarding_step: Option<String>,
     #[ts(type = "number")]
     pub shifts_next_7_days: i64,
     pub contract_expiry_date: Option<String>, // null if no contract
@@ -62,6 +68,7 @@ pub async fn get_me(
         display_name: user.display_name,
         is_committee: user.is_committee,
         code_of_conduct_signed: user.code_of_conduct_signed,
+        code_of_conduct_version: user.code_of_conduct_version,
         food_safety_completed: user.food_safety_completed,
         has_food_safety_certificate: user.food_safety_certificate.is_some(),
         induction_completed: user.induction_completed,
@@ -75,30 +82,47 @@ pub async fn get_me(
     }))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct AcceptCocRequest {
+    /// The version the user was shown. Rejected if a newer one was published
+    /// while they were reading.
+    pub version: i64,
+}
+
 // Accept Code of Conduct
 pub async fn accept_coc(
     State(state): State<AppState>,
     AuthenticatedUser(user): AuthenticatedUser,
+    Json(req): Json<AcceptCocRequest>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    info!("✍️ User {} accepting Code of Conduct", user.id);
+    info!("✍️ User {} accepting Code of Conduct v{}", user.id, req.version);
 
-    // Update user's CoC status
-    sqlx::query("UPDATE users SET code_of_conduct_signed = ? WHERE id = ?")
-        .bind(true)
-        .bind(&user.id)
-        .execute(&state.db)
+    let internal = |e: sqlx::Error| {
+        error!("❌ Failed to update CoC status: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "Failed to accept Code of Conduct".to_string(),
+            }),
+        )
+    };
+
+    let mut tx = state.db.begin().await.map_err(internal)?;
+    let current = current_coc_version(&mut *tx).await.map_err(internal)?;
+    if req.version != current {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(ErrorResponse {
+                error: "The Code of Conduct has been updated — please re-read it".to_string(),
+            }),
+        ));
+    }
+    record_signature(&mut *tx, &user.id, current, state.clock.now())
         .await
-        .map_err(|e| {
-            error!("❌ Failed to update CoC status: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: "Failed to accept Code of Conduct".to_string(),
-                }),
-            )
-        })?;
+        .map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
 
-    info!("✅ Code of Conduct accepted for user: {}", user.id);
+    info!("✅ Code of Conduct v{} accepted for user: {}", current, user.id);
 
     Ok(StatusCode::OK)
 }
@@ -389,7 +413,11 @@ pub async fn get_my_overview(
     let next_onboarding_step = if !user.induction_completed {
         Some("induction".to_string())
     } else if !user.code_of_conduct_signed {
-        Some("code_of_conduct".to_string())
+        Some(if user.code_of_conduct_version.is_some() {
+            "code_of_conduct_resign".to_string()
+        } else {
+            "code_of_conduct".to_string()
+        })
     } else if !user.food_safety_completed {
         Some("food_safety".to_string())
     } else if !user.supervised_shift_completed {
@@ -564,6 +592,10 @@ pub async fn delete_user_account(db: &sqlx::SqlitePool, user_id: &str) -> Result
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
+    sqlx::query("UPDATE coc_versions SET published_by = NULL WHERE published_by = ?")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
     sqlx::query("DELETE FROM users WHERE id = ?")
         .bind(user_id)
         .execute(&mut *tx)
@@ -624,6 +656,8 @@ pub async fn export_my_data(
             "is_committee": user.is_committee,
             "is_admin": user.is_admin,
             "code_of_conduct_signed": user.code_of_conduct_signed,
+            "code_of_conduct_version": user.code_of_conduct_version,
+            "code_of_conduct_signed_at": user.code_of_conduct_signed_at,
             "food_safety_completed": user.food_safety_completed,
             "has_food_safety_certificate": user.food_safety_certificate.is_some(),
             "induction_completed": user.induction_completed,
@@ -951,7 +985,7 @@ mod tests {
 
     // Impact: bar_status and kiosk_pairings reference users without a foreign
     // key, so a cascade alone left deleted members' IDs behind.
-    // Should not: leave the deleted user recorded as the bar opener or kiosk approver.
+    // Should not: leave the deleted user recorded as the bar opener, kiosk approver, or CoC publisher.
     #[tokio::test]
     async fn account_deletion_clears_kiosk_references() {
         let state = test_state().await;
@@ -970,6 +1004,11 @@ mod tests {
         .execute(&state.db)
         .await
         .unwrap();
+        sqlx::query("INSERT INTO coc_versions (version, body, published_by) VALUES (2, 'v2', ?)")
+            .bind(&user.id)
+            .execute(&state.db)
+            .await
+            .unwrap();
 
         let db = state.db.clone();
         delete_my_account(State(state), AuthenticatedUser(user.clone())).await.unwrap();
@@ -977,6 +1016,7 @@ mod tests {
         let remaining: i64 = sqlx::query_scalar(
             "SELECT (SELECT COUNT(*) FROM bar_status WHERE opened_by = ?1)
                   + (SELECT COUNT(*) FROM kiosk_pairings WHERE approved_by = ?1)
+                  + (SELECT COUNT(*) FROM coc_versions WHERE published_by = ?1)
                   + (SELECT COUNT(*) FROM users WHERE id = ?1)",
         )
         .bind(&user.id)
@@ -984,5 +1024,103 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(remaining, 0);
+    }
+
+    async fn coc_state(state: &AppState, user_id: &str) -> (bool, Option<i64>, Option<String>) {
+        sqlx::query_as(
+            "SELECT code_of_conduct_signed, code_of_conduct_version, code_of_conduct_signed_at
+             FROM users WHERE id = ?",
+        )
+        .bind(user_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap()
+    }
+
+    async fn publish_v2(state: &AppState) {
+        sqlx::query("INSERT INTO coc_versions (version, body) VALUES (2, 'v2')")
+            .execute(&state.db)
+            .await
+            .unwrap();
+    }
+
+    // Should: record the signed version and the time of signing.
+    #[tokio::test]
+    async fn accepting_current_coc_records_version_and_time() {
+        let state = test_state().await;
+        publish_v2(&state).await;
+        let user = user_with(true, false, true, true);
+        insert_user(&state.db, &user).await;
+
+        let status = accept_coc(
+            State(state.clone()),
+            AuthenticatedUser(user.clone()),
+            Json(AcceptCocRequest { version: 2 }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            coc_state(&state, &user.id).await,
+            (true, Some(2), Some("2026-06-17 14:00:00".to_string()))
+        );
+    }
+
+    // Impact: a new version can be published while a member has the old text
+    // open; accepting then must not count as signing text they never saw.
+    // Should not: count acceptance of a superseded version as a signature.
+    #[tokio::test]
+    async fn accepting_stale_coc_version_conflicts() {
+        let state = test_state().await;
+        publish_v2(&state).await;
+        let user = user_with(true, false, true, true);
+        insert_user(&state.db, &user).await;
+
+        let (status, _) = accept_coc(
+            State(state.clone()),
+            AuthenticatedUser(user.clone()),
+            Json(AcceptCocRequest { version: 1 }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(coc_state(&state, &user.id).await, (false, None, None));
+    }
+
+    // Should: include the signed CoC version and signing time in a member's data export.
+    #[tokio::test]
+    async fn data_export_includes_coc_signature() {
+        let state = test_state().await;
+        let user = user_with(true, false, true, true);
+        insert_user(&state.db, &user).await;
+        accept_coc(State(state.clone()), AuthenticatedUser(user.clone()), Json(AcceptCocRequest { version: 1 }))
+            .await
+            .unwrap();
+        let signed = sqlx::query_as::<_, crate::models::User>("SELECT * FROM users WHERE id = ?")
+            .bind(&user.id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap();
+
+        let Json(data) = export_my_data(State(state), AuthenticatedUser(signed)).await.unwrap();
+        assert_eq!(data["profile"]["code_of_conduct_version"], 1);
+        assert_eq!(data["profile"]["code_of_conduct_signed_at"], "2026-06-17 14:00:00");
+    }
+
+    // Should: point a member whose CoC was reset at re-signing rather than first-time signing.
+    // Should: keep asking members who never signed to sign for the first time.
+    #[tokio::test]
+    async fn overview_distinguishes_resign_from_first_signature() {
+        let state = test_state().await;
+        let mut reset = user_with(true, false, true, true);
+        reset.code_of_conduct_version = Some(1);
+        let never = user_with(true, false, true, true);
+        insert_user(&state.db, &reset).await;
+        insert_user(&state.db, &never).await;
+
+        let Json(o) = get_my_overview(State(state.clone()), AuthenticatedUser(reset)).await.unwrap();
+        assert_eq!(o.next_onboarding_step.as_deref(), Some("code_of_conduct_resign"));
+        let Json(o) = get_my_overview(State(state), AuthenticatedUser(never)).await.unwrap();
+        assert_eq!(o.next_onboarding_step.as_deref(), Some("code_of_conduct"));
     }
 }

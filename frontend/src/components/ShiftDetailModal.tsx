@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { signupForShift, cancelShiftSignup, removeUserFromShift, getUserId, getActiveMembers, assignUserToShift, setInductionAvailability, removeInductionAvailability, signupForInduction, cancelInductionSignup, getInductionDates, canSignupForShifts } from '../lib/auth'
 import type { ShiftInfo } from '../types/ShiftInfo'
+import { Badge } from '@/components/ui/badge'
 import type { UserStatus } from '../types/UserStatus'
 import type { ActiveMember } from '../types/ActiveMember'
 import type { Event } from '../types/Event'
@@ -273,6 +274,15 @@ export default function ShiftDetailModal({ shift, event, userStatus, isCommittee
                     {signup.display_name || 'Unknown'}
                     {signup.user_id === currentUserId && (
                       <span style={{ color: '#8B0000', marginLeft: '5px' }}>(You)</span>
+                    )}
+                    {signup.needs_coc && (
+                      <Badge
+                        variant="outline"
+                        className="ml-2 border-amber-300 bg-amber-50 text-amber-800"
+                        title="Can't check in until they re-sign the updated Code of Conduct"
+                      >
+                        Needs to re-sign CoC
+                      </Badge>
                     )}
                   </span>
                   {isCommittee && (

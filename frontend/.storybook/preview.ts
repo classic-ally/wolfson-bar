@@ -3,6 +3,7 @@ import { INITIAL_VIEWPORTS } from 'storybook/viewport'
 import { initialize, mswLoader } from 'msw-storybook-addon'
 import { http, HttpResponse } from 'msw'
 import '../src/index.css'
+import { cocHandlers } from '../src/test/handlers'
 
 // authenticatedFetch in src/lib/auth.ts throws AuthError("Not authenticated")
 // when no JWT is present, before MSW can intercept. Plant a fake token so
@@ -52,6 +53,7 @@ const preview: Preview = {
         http.get('*/api/admin/pending-certificates', () => HttpResponse.json([])),
         http.get('*/api/admin/pending-contracts', () => HttpResponse.json([])),
         http.get('*/api/induction-dates', () => HttpResponse.json([])),
+        ...cocHandlers,
       ],
     },
   },

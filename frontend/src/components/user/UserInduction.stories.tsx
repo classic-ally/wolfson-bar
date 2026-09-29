@@ -10,6 +10,7 @@ function makeUser(overrides: Partial<UserStatus> = {}): UserStatus {
     display_name: 'Agrima',
     is_committee: false,
     code_of_conduct_signed: false,
+    code_of_conduct_version: null,
     food_safety_completed: false,
     has_food_safety_certificate: false,
     induction_completed: false,

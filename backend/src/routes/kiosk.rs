@@ -548,10 +548,19 @@ pub async fn check_in(
     Json(req): Json<CheckInRequest>,
 ) -> Result<Json<CheckInResponse>, (StatusCode, Json<ErrorResponse>)> {
     if !user.is_rota_member() {
-        return Err(reject(
-            StatusCode::FORBIDDEN,
-            "You must be a fully-inducted rota member to check in",
-        ));
+        // Members already on the rota lose check-in when a new CoC is
+        // published; tell them the one thing to do instead of the generic gate.
+        let only_coc_missing = !user.code_of_conduct_signed && {
+            let mut signed = user.clone();
+            signed.code_of_conduct_signed = true;
+            signed.is_rota_member()
+        };
+        let msg = if only_coc_missing {
+            "Please re-sign the updated Code of Conduct on your profile before checking in"
+        } else {
+            "You must be a fully-inducted rota member to check in"
+        };
+        return Err(reject(StatusCode::FORBIDDEN, msg));
     }
 
     if !is_code_valid(&state.kiosk_secret, state.clock.unix_secs(), &req.code) {
@@ -1333,6 +1342,20 @@ mod tests {
         let member = user_with(true, true, true, false); // missing supervised shift
         insert_user(&state.db, &member).await;
         assert_eq!(check_in_as(&state, &token_for(&state, &member)).await.status(), Status::FORBIDDEN);
+    }
+
+    // Impact: a member already booked on tonight's shift loses check-in when a
+    // new CoC is published; the error is their only prompt at the bar.
+    // Should: tell a rota member whose CoC signature was reset to re-sign it.
+    #[tokio::test]
+    async fn reset_coc_member_is_told_to_resign() {
+        let state = test_state().await;
+        let member = user_with(true, false, true, true);
+        insert_user(&state.db, &member).await;
+        let res = check_in_as(&state, &token_for(&state, &member)).await;
+        assert_eq!(res.status(), Status::FORBIDDEN);
+        let msg = body_json(res).await["error"].as_str().unwrap().to_string();
+        assert!(msg.contains("re-sign the updated Code of Conduct"), "got: {msg}");
     }
 
     // Should: reject a code that isn't currently shown.

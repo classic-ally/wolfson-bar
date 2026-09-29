@@ -37,7 +37,13 @@ pub struct User {
     pub is_committee: bool,
     #[sqlx(default)]
     pub is_admin: bool,
+    /// True only when the user has signed the latest `coc_versions` row.
+    /// Publishing a new version resets it for everyone.
     pub code_of_conduct_signed: bool,
+    #[sqlx(default)]
+    pub code_of_conduct_version: Option<i64>,
+    #[sqlx(default)]
+    pub code_of_conduct_signed_at: Option<String>,
     pub food_safety_completed: bool,
     #[sqlx(default)]
     pub food_safety_certificate: Option<Vec<u8>>,
@@ -87,6 +93,8 @@ impl User {
             is_committee,
             is_admin,
             code_of_conduct_signed: false,
+            code_of_conduct_version: None,
+            code_of_conduct_signed_at: None,
             food_safety_completed: false,
             food_safety_certificate: None,
             food_safety_certificate_type: None,

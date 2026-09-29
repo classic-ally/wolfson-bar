@@ -199,6 +199,16 @@ export default function ShiftCalendarDay({
       {!isPublic && shift && (
         <span className="text-[9px] sm:text-[10px] leading-tight font-medium">
           {shift.signups_count}/{shift.max_volunteers}
+          {shift.signups.some((s) => s.needs_coc) && (
+            // inline-block stops a full day's line-through from striking the marker out.
+            <span
+              className="ml-1 inline-block text-xs font-extrabold text-amber-600 no-underline"
+              title="Someone on this shift needs to re-sign the Code of Conduct"
+              aria-label="Someone on this shift needs to re-sign the Code of Conduct"
+            >
+              !
+            </span>
+          )}
         </span>
       )}
       {/* Stacked event chips. Capacity rises with cell size: 2 chips at md,
