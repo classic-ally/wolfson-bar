@@ -276,7 +276,7 @@ export default function UserInduction() {
                   </div>
                 </div>
               ) : inductionDates.length === 0 ? (
-                <p style={{ color: '#888', fontSize: '14px', margin: 0 }}>
+                <p style={{ color: '#666', fontSize: '14px', margin: 0 }}>
                   No induction dates currently available. Check back soon or view the calendar.
                 </p>
               ) : (
@@ -428,7 +428,7 @@ export default function UserInduction() {
                 disabled={uploading}
                 style={{ display: 'none' }}
               />
-              <span style={{ color: '#888', fontSize: '12px' }}>Accepts images or PDF (max 5 MB)</span>
+              <span style={{ color: '#666', fontSize: '12px' }}>Accepts images or PDF (max 5 MB)</span>
               {status.has_food_safety_certificate && (
                 <span style={{ color: '#856404', fontSize: '14px' }}>⏳ Pending committee review</span>
               )}
@@ -456,12 +456,12 @@ export default function UserInduction() {
             }
           </p>
           {!status.supervised_shift_completed && !status.induction_completed && (
-            <p style={{ color: '#888', fontSize: '13px', margin: 0, fontStyle: 'italic' }}>
+            <p style={{ color: '#666', fontSize: '13px', margin: 0, fontStyle: 'italic' }}>
               Tip: When signing up for induction, select "Also do supervised shift" if a committee member is available for the full evening.
             </p>
           )}
           {!status.supervised_shift_completed && canSignupForShifts(status) && (
-            <p style={{ color: '#888', fontSize: '13px', margin: 0 }}>
+            <p style={{ color: '#666', fontSize: '13px', margin: 0 }}>
               Check the calendar for shifts where a committee member is signed up.
             </p>
           )}
