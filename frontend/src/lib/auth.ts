@@ -21,14 +21,26 @@ import type { BarStatus } from '../types/BarStatus'
 import type { KioskDeviceInfo } from '../types/KioskDeviceInfo'
 import type { PairStartResponse } from '../types/PairStartResponse'
 import type { PairStatusResponse } from '../types/PairStatusResponse'
+import type { PairingInfo } from '../types/PairingInfo'
+import { consumeReturnTo } from './returnTo'
 
 const API_BASE = window.location.origin
 
 export class AuthError extends Error {
-  constructor(message: string) {
+  /** HTTP status of the failed response, when there was one. */
+  readonly status?: number
+
+  constructor(message: string, status?: number) {
     super(message)
     this.name = 'AuthError'
+    this.status = status
   }
+}
+
+/** Build an AuthError from a failed response, tolerating non-JSON bodies. */
+async function responseError(response: Response, fallback: string): Promise<AuthError> {
+  const body = await response.json().catch(() => ({}))
+  return new AuthError(body.error || fallback, response.status)
 }
 
 /**
@@ -131,8 +143,13 @@ export async function loginWithPasskey(): Promise<AuthResponse> {
     localStorage.setItem('is_committee', authResponse.is_committee.toString())
     localStorage.setItem('is_admin', authResponse.is_admin.toString())
 
-    // Reload to reflect new auth state
-    window.location.reload()
+    // Reload to reflect new auth state, back on the page that asked for login if any.
+    const returnTo = consumeReturnTo()
+    if (returnTo) {
+      window.location.assign(returnTo)
+    } else {
+      window.location.reload()
+    }
 
     return authResponse
   } catch (error) {
@@ -1233,8 +1250,7 @@ export async function kioskPairStart(tokenHash: string): Promise<string> {
     body: JSON.stringify({ token_hash: tokenHash }),
   })
   if (!response.ok) {
-    const error = await response.json()
-    throw new AuthError(error.error || 'Failed to start pairing')
+    throw await responseError(response, 'Failed to start pairing')
   }
   const data: PairStartResponse = await response.json()
   return data.code
@@ -1244,11 +1260,21 @@ export async function kioskPairStart(tokenHash: string): Promise<string> {
 export async function kioskPairStatus(code: string): Promise<string> {
   const response = await fetch(`${API_BASE}/api/kiosk/pair/status?code=${encodeURIComponent(code)}`)
   if (!response.ok) {
-    const error = await response.json()
-    throw new AuthError(error.error || 'Failed to check pairing status')
+    throw await responseError(response, 'Failed to check pairing status')
   }
   const data: PairStatusResponse = await response.json()
   return data.status
+}
+
+/** Committee: where and when a pairing was started, before approving it. */
+export async function getKioskPairingInfo(code: string): Promise<PairingInfo> {
+  const response = await authenticatedFetch(
+    `${API_BASE}/api/kiosk/pair/info?code=${encodeURIComponent(code)}`,
+  )
+  if (!response.ok) {
+    throw await responseError(response, 'Failed to load pairing')
+  }
+  return response.json()
 }
 
 /** A committee member approves a pending pairing (scanned from the kiosk). */
@@ -1259,15 +1285,15 @@ export async function kioskPairApprove(code: string, name: string): Promise<void
     body: JSON.stringify({ code, name: name || null }),
   })
   if (!response.ok) {
-    const error = await response.json()
-    throw new AuthError(error.error || 'Failed to approve pairing')
+    throw await responseError(response, 'Failed to approve pairing')
   }
 }
 
 /**
  * Fetch the live rotating check-in code for display on an enrolled kiosk.
  * Authenticated by the device token (X-Kiosk-Token), not a user session.
- * Throws AuthError on 401 so the caller can fall back to re-pairing.
+ * Throws AuthError with `status` set; only a 401 means the device was revoked.
+ * Network failures reject with the underlying TypeError.
  */
 export async function getKioskCode(): Promise<CheckinCode> {
   const token = getKioskToken()
@@ -1278,8 +1304,7 @@ export async function getKioskCode(): Promise<CheckinCode> {
     headers: { 'X-Kiosk-Token': token },
   })
   if (!response.ok) {
-    const error = await response.json().catch(() => ({}))
-    throw new AuthError(error.error || 'Kiosk not enrolled')
+    throw await responseError(response, 'Kiosk not enrolled')
   }
   return response.json()
 }
@@ -1312,8 +1337,7 @@ export async function checkInShift(code: string): Promise<CheckInResponse> {
     body: JSON.stringify({ code }),
   })
   if (!response.ok) {
-    const error = await response.json()
-    throw new AuthError(error.error || 'Failed to check in')
+    throw await responseError(response, 'Failed to check in')
   }
   return response.json()
 }
