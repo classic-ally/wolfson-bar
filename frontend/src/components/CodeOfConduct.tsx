@@ -132,6 +132,9 @@ export default function CodeOfConduct({
 
         <div
           onScroll={handleScroll}
+          tabIndex={0}
+          role="region"
+          aria-label="Code of conduct text"
           className="coc-markdown flex-1 min-h-0 overflow-y-auto rounded-md border border-border bg-muted/30 p-4 text-sm leading-relaxed"
         >
           <ReactMarkdown>{cocContent}</ReactMarkdown>
