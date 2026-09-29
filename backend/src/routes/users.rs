@@ -551,6 +551,26 @@ pub async fn accept_privacy(
     Ok(StatusCode::OK)
 }
 
+/// Delete a user and everything that identifies them. Rows owned by the user
+/// cascade via foreign keys; references without one (who opened the bar, who
+/// approved a kiosk) are cleared here.
+pub async fn delete_user_account(db: &sqlx::SqlitePool, user_id: &str) -> Result<(), sqlx::Error> {
+    let mut tx = db.begin().await?;
+    sqlx::query("UPDATE bar_status SET opened_by = NULL WHERE opened_by = ?")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("UPDATE kiosk_pairings SET approved_by = NULL WHERE approved_by = ?")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM users WHERE id = ?")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await
+}
+
 /// Self-service account deletion
 pub async fn delete_my_account(
     State(state): State<AppState>,
@@ -558,10 +578,7 @@ pub async fn delete_my_account(
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
     info!("User {} requesting account deletion", user.id);
 
-    // CASCADE handles shift_signups and email_notification_log
-    sqlx::query("DELETE FROM users WHERE id = ?")
-        .bind(&user.id)
-        .execute(&state.db)
+    delete_user_account(&state.db, &user.id)
         .await
         .map_err(|e| {
             error!("Failed to delete user: {}", e);
@@ -578,9 +595,10 @@ pub async fn export_my_data(
     AuthenticatedUser(user): AuthenticatedUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
     // Get shift signups
-    let signups: Vec<(String, Option<String>)> = sqlx::query_as(
+    let signups: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
         "SELECT s.shift_date,
-                (SELECT title FROM events WHERE event_date = s.shift_date) as event_title
+                (SELECT title FROM events WHERE event_date = s.shift_date) as event_title,
+                s.checked_in_at
          FROM shift_signups s WHERE s.user_id = ? ORDER BY s.shift_date"
     )
     .bind(&user.id)
@@ -615,8 +633,8 @@ pub async fn export_my_data(
             "supervised_shift_completed": user.supervised_shift_completed,
             "created_at": user.created_at,
         },
-        "shift_signups": signups.iter().map(|(date, title)| {
-            serde_json::json!({ "date": date, "event_title": title })
+        "shift_signups": signups.iter().map(|(date, title, checked_in_at)| {
+            serde_json::json!({ "date": date, "event_title": title, "checked_in_at": checked_in_at })
         }).collect::<Vec<_>>(),
         "notification_log": notifications.iter().map(|(date, ntype, sent)| {
             serde_json::json!({ "shift_date": date, "type": ntype, "sent_at": sent })
@@ -906,5 +924,65 @@ mod cert_upload_tests {
             .unwrap();
         let status = build_app(state).oneshot(req).await.unwrap().status();
         assert_eq!(status, Status::UNAUTHORIZED);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_util::{insert_shift_signup, insert_user, test_state, user_with};
+
+    // Should: include kiosk check-in times alongside each shift in a member's data export.
+    #[tokio::test]
+    async fn data_export_includes_check_in_times() {
+        let state = test_state().await;
+        let user = user_with(true, true, true, true);
+        insert_user(&state.db, &user).await;
+        insert_shift_signup(&state.db, &user.id, "2026-06-19").await;
+        sqlx::query("UPDATE shift_signups SET checked_in_at = '2026-06-19 19:45:00' WHERE user_id = ?")
+            .bind(&user.id)
+            .execute(&state.db)
+            .await
+            .unwrap();
+
+        let Json(data) = export_my_data(State(state), AuthenticatedUser(user)).await.unwrap();
+        assert_eq!(data["shift_signups"][0]["checked_in_at"], "2026-06-19 19:45:00");
+    }
+
+    // Impact: bar_status and kiosk_pairings reference users without a foreign
+    // key, so a cascade alone left deleted members' IDs behind.
+    // Should not: leave the deleted user recorded as the bar opener or kiosk approver.
+    #[tokio::test]
+    async fn account_deletion_clears_kiosk_references() {
+        let state = test_state().await;
+        let user = user_with(true, true, true, true);
+        insert_user(&state.db, &user).await;
+        sqlx::query("UPDATE bar_status SET is_open = 1, opened_by = ? WHERE id = 1")
+            .bind(&user.id)
+            .execute(&state.db)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO kiosk_pairings (code, token_hash, status, approved_by, expires_at)
+             VALUES ('c', 'h', 'approved', ?, '2026-06-19 20:00:00')",
+        )
+        .bind(&user.id)
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        let db = state.db.clone();
+        delete_my_account(State(state), AuthenticatedUser(user.clone())).await.unwrap();
+
+        let remaining: i64 = sqlx::query_scalar(
+            "SELECT (SELECT COUNT(*) FROM bar_status WHERE opened_by = ?1)
+                  + (SELECT COUNT(*) FROM kiosk_pairings WHERE approved_by = ?1)
+                  + (SELECT COUNT(*) FROM users WHERE id = ?1)",
+        )
+        .bind(&user.id)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(remaining, 0);
     }
 }

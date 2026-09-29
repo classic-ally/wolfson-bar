@@ -112,12 +112,14 @@ struct ShiftHistoryExportRow {
     event_title: String,
     display_name: Option<String>,
     email: Option<String>,
+    checked_in_at: Option<String>,
 }
 
 /// Export the full shift signup history as a CSV. Committee-only.
 ///
-/// Columns: shift_date, event_title, display_name, email. An empty event_title
-/// indicates a regular (non-event) bar night, not a missing event row.
+/// Columns: shift_date, event_title, display_name, email, checked_in_at. An empty
+/// event_title indicates a regular (non-event) bar night, not a missing event row;
+/// an empty checked_in_at means the member never scanned in at the kiosk (UTC otherwise).
 pub async fn export_shift_history_csv(
     State(state): State<AppState>,
     CommitteeUser(user): CommitteeUser,
@@ -128,7 +130,8 @@ pub async fn export_shift_history_csv(
         "SELECT s.shift_date, \
                 COALESCE(e.title, '') AS event_title, \
                 u.display_name, \
-                u.email \
+                u.email, \
+                s.checked_in_at \
          FROM shift_signups s \
          JOIN users u ON u.id = s.user_id \
          LEFT JOIN events e ON e.event_date = s.shift_date \
@@ -147,7 +150,7 @@ pub async fn export_shift_history_csv(
     })?;
 
     let mut body = String::new();
-    body.push_str("shift_date,event_title,display_name,email\n");
+    body.push_str("shift_date,event_title,display_name,email,checked_in_at\n");
     for r in &rows {
         body.push_str(&csv_field(&r.shift_date));
         body.push(',');
@@ -156,6 +159,8 @@ pub async fn export_shift_history_csv(
         body.push_str(&csv_field_opt(r.display_name.as_deref()));
         body.push(',');
         body.push_str(&csv_field_opt(r.email.as_deref()));
+        body.push(',');
+        body.push_str(&csv_field_opt(r.checked_in_at.as_deref()));
         body.push('\n');
     }
 
@@ -425,7 +430,7 @@ mod tests {
         insert_user(&state.db, &user).await;
 
         let body = run_shift_history_export(state, user).await;
-        assert_eq!(body, "shift_date,event_title,display_name,email\n");
+        assert_eq!(body, "shift_date,event_title,display_name,email,checked_in_at\n");
     }
 
     #[tokio::test]
@@ -440,7 +445,7 @@ mod tests {
         let body = run_shift_history_export(state, user).await;
         let lines: Vec<&str> = body.lines().collect();
         assert_eq!(lines.len(), 2, "non-event signup dropped: {body:?}");
-        assert_eq!(lines[1], "2026-06-10,,Test,");
+        assert_eq!(lines[1], "2026-06-10,,Test,,");
     }
 
     #[tokio::test]
@@ -453,7 +458,7 @@ mod tests {
 
         let body = run_shift_history_export(state, user).await;
         let row = body.lines().nth(1).unwrap();
-        assert_eq!(row, "2026-06-11,Quiz Night,Test,");
+        assert_eq!(row, "2026-06-11,Quiz Night,Test,,");
     }
 
     #[tokio::test]
@@ -485,7 +490,7 @@ mod tests {
         let body = run_shift_history_export(state, user).await;
         let row = body.lines().nth(1).unwrap();
         // event_title with a comma must be wrapped in quotes.
-        assert_eq!(row, "2026-06-20,\"Halfway Hall, Trinity\",Test,");
+        assert_eq!(row, "2026-06-20,\"Halfway Hall, Trinity\",Test,,");
     }
 
     #[tokio::test]
@@ -498,7 +503,25 @@ mod tests {
 
         let body = run_shift_history_export(state, user).await;
         let row = body.lines().nth(1).unwrap();
-        assert_eq!(row, "2026-06-25,,Test,test@example.com");
+        assert_eq!(row, "2026-06-25,,Test,test@example.com,");
+    }
+
+    // Should: include when each member checked in at the kiosk.
+    #[tokio::test]
+    async fn export_shift_history_includes_kiosk_check_in_time() {
+        let state = test_state().await;
+        let user = rota_member(true);
+        insert_user(&state.db, &user).await;
+        insert_shift_signup(&state.db, &user.id, "2026-06-26").await;
+        sqlx::query("UPDATE shift_signups SET checked_in_at = '2026-06-26 19:31:00' WHERE user_id = ?")
+            .bind(&user.id)
+            .execute(&state.db)
+            .await
+            .unwrap();
+
+        let body = run_shift_history_export(state, user).await;
+        let row = body.lines().nth(1).unwrap();
+        assert_eq!(row, "2026-06-26,,Test,,2026-06-26 19:31:00");
     }
 
     // -------- Export auth gates --------
