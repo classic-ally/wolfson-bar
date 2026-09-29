@@ -62,3 +62,22 @@ export const Enrolled: Story = {
     expect(qr.getAttribute('src')).toMatch(/^data:image/)
   },
 }
+
+// Enrolled device whose backend is down → it keeps its token and says it's reconnecting.
+export const BackendDown: Story = {
+  decorators: [withKioskToken('dev-device-token')],
+  parameters: {
+    msw: {
+      handlers: [
+        http.get('*/api/kiosk/checkin-code', () =>
+          HttpResponse.json({ error: 'Internal error' }, { status: 503 }),
+        ),
+      ],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(await canvas.findByRole('status')).toHaveTextContent(/Reconnecting/)
+    expect(localStorage.getItem('kiosk_token')).toBe('dev-device-token')
+  },
+}

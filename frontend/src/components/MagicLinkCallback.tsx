@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import Page from './Page'
+import { consumeReturnTo } from '../lib/returnTo'
 
 export default function MagicLinkCallback() {
   const [searchParams] = useSearchParams()
@@ -24,8 +25,8 @@ export default function MagicLinkCallback() {
     localStorage.setItem('is_committee', isCommittee === 'true' ? 'true' : 'false')
     localStorage.setItem('is_admin', isAdmin === 'true' ? 'true' : 'false')
 
-    // Redirect to home
-    navigate('/', { replace: true })
+    // Back to the page that asked for login (e.g. a kiosk check-in), else home
+    navigate(consumeReturnTo() ?? '/', { replace: true })
     window.location.reload()
   }, [searchParams, navigate])
 

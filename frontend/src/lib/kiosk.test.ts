@@ -4,6 +4,7 @@ import {
   clearKioskToken,
   getBarStatus,
   getKioskCode,
+  getKioskPairingInfo,
   getKioskToken,
   kioskPairApprove,
   kioskPairStart,
@@ -53,11 +54,11 @@ describe('kiosk auth helpers', () => {
   it('checkInShift posts the code with Bearer auth', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValue(json({ checked_in: true, was_signed_up: false, bar_opened: true }))
+      .mockResolvedValue(json({ shift_date: '2026-06-19', was_signed_up: false, bar_open: true }))
     vi.stubGlobal('fetch', fetchMock)
 
     const res = await checkInShift('ABCD1234')
-    expect(res.checked_in).toBe(true)
+    expect(res.shift_date).toBe('2026-06-19')
     expect(res.was_signed_up).toBe(false)
 
     const [url, opts] = fetchMock.mock.calls[0]
@@ -71,6 +72,39 @@ describe('kiosk auth helpers', () => {
     const fetchMock = vi.fn().mockResolvedValue(json({ error: 'Invalid or expired code' }, 400))
     vi.stubGlobal('fetch', fetchMock)
     await expect(checkInShift('nope')).rejects.toThrow('Invalid or expired code')
+  })
+
+  // Impact: the kiosk decides whether to discard its device token from this
+  // status; losing it means a committee member has to re-pair the bar PC.
+  // Should: expose the HTTP status on errors from the device-code endpoint.
+  it('getKioskCode errors carry the HTTP status', async () => {
+    setKioskToken('device-token-123')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ error: 'Kiosk not enrolled' }, 401)))
+    await expect(getKioskCode()).rejects.toMatchObject({ status: 401 })
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ error: 'Internal error' }, 500)))
+    await expect(getKioskCode()).rejects.toMatchObject({ status: 500, message: 'Internal error' })
+  })
+
+  // Should: fall back to a generic message when a proxy returns a non-JSON error page.
+  it('kiosk helpers tolerate non-JSON error bodies', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>Bad Gateway</html>', { status: 502 })))
+    await expect(kioskPairStart('a'.repeat(64))).rejects.toMatchObject({
+      status: 502,
+      message: 'Failed to start pairing',
+    })
+  })
+
+  // Should: fetch pairing details with committee auth.
+  it('getKioskPairingInfo sends Bearer auth to pair/info', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      json({ status: 'pending', created_at: '', expires_at: '', client_ip: null, user_agent: null, active_devices: 0 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    await getKioskPairingInfo('pair-1')
+    const [url, opts] = fetchMock.mock.calls[0]
+    expect(url).toContain('/api/kiosk/pair/info?code=pair-1')
+    expect(opts.headers).toMatchObject({ Authorization: 'Bearer test-token' })
   })
 
   it('getBarStatus is unauthenticated (no Authorization header)', async () => {

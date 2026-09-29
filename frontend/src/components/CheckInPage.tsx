@@ -1,34 +1,35 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import Page from './Page'
-import { checkInShift, isLoggedIn, loginWithPasskey } from '../lib/auth'
+import SignInModal from './auth/SignInModal'
+import { Button } from '@/components/ui/button'
+import { AuthError, checkInShift, isLoggedIn } from '../lib/auth'
+import { rememberReturnTo } from '../lib/returnTo'
+import type { CheckInResponse } from '../types/CheckInResponse'
 
 // Public landing page a rota member reaches by scanning the kiosk QR.
-type State = 'idle' | 'checking' | 'success' | 'error' | 'needauth'
-
-const buttonStyle: React.CSSProperties = {
-  padding: '10px 20px',
-  backgroundColor: '#8B0000',
-  color: 'white',
-  border: 'none',
-  borderRadius: '4px',
-  cursor: 'pointer',
-}
+type State = 'idle' | 'checking' | 'success' | 'expired' | 'error' | 'needauth'
 
 export default function CheckInPage() {
   const [params] = useSearchParams()
+  const location = useLocation()
   const code = params.get('code') || ''
   const [state, setState] = useState<State>('idle')
   const [message, setMessage] = useState('')
-  const [wasSignedUp, setWasSignedUp] = useState(false)
+  const [result, setResult] = useState<CheckInResponse | null>(null)
+  const [signInOpen, setSignInOpen] = useState(false)
 
   async function submit() {
     setState('checking')
     try {
-      const res = await checkInShift(code)
-      setWasSignedUp(res.was_signed_up)
+      setResult(await checkInShift(code))
       setState('success')
     } catch (e) {
+      // The kiosk code rotates every 30s; after a sign-in round trip it has usually moved on.
+      if (e instanceof AuthError && e.status === 400) {
+        setState('expired')
+        return
+      }
       setMessage(e instanceof Error ? e.message : 'Check-in failed')
       setState('error')
     }
@@ -43,47 +44,51 @@ export default function CheckInPage() {
     if (isLoggedIn()) {
       submit()
     } else {
+      // Passkey login reloads and magic links go via email: both come back here.
+      rememberReturnTo(location.pathname + location.search)
       setState('needauth')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  async function handleLogin() {
-    try {
-      // On success this reloads; isLoggedIn() then true and the effect submits.
-      await loginWithPasskey()
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : 'Login failed')
-    }
-  }
 
   return (
     <Page size="narrow">
       <div style={{ textAlign: 'center' }}>
         {state === 'checking' && <h2>Checking you in…</h2>}
 
-        {state === 'success' && (
+        {state === 'success' && result && (
           <>
             <h2 style={{ color: '#198754' }}>✅ You're checked in!</h2>
             <p style={{ color: '#666' }}>
-              {wasSignedUp
+              {result.was_signed_up
                 ? 'Thanks for taking your shift.'
                 : 'Walk-in recorded — thanks for covering.'}
             </p>
-            <p style={{ color: '#666' }}>The bar is now marked open.</p>
+            <p style={{ color: '#666' }}>
+              {result.bar_open
+                ? 'The bar is marked open.'
+                : "The bar's scheduled hours are over, so it hasn't been marked open."}
+            </p>
           </>
         )}
 
         {state === 'needauth' && (
           <>
-            <h2>Log in to check in</h2>
+            <h2>Sign in to check in</h2>
             <p style={{ color: '#666' }}>
-              Sign in with your passkey to record your attendance.
+              Sign in with your passkey or an email link to record your attendance.
             </p>
-            <button onClick={handleLogin} style={buttonStyle}>
-              Log in with passkey
-            </button>
-            {message && <p style={{ color: '#dc3545', marginTop: 16 }}>{message}</p>}
+            <Button onClick={() => setSignInOpen(true)}>Sign in</Button>
+            <SignInModal open={signInOpen} onOpenChange={setSignInOpen} onSignedIn={() => {}} />
+          </>
+        )}
+
+        {state === 'expired' && (
+          <>
+            <h2>Code expired</h2>
+            <p style={{ color: '#666' }}>
+              The check-in code changes every 30 seconds. Scan the QR on the bar screen again.
+            </p>
           </>
         )}
 
@@ -91,11 +96,7 @@ export default function CheckInPage() {
           <>
             <h2 style={{ color: '#dc3545' }}>Couldn't check you in</h2>
             <p style={{ color: '#666' }}>{message}</p>
-            {code && (
-              <button onClick={submit} style={buttonStyle}>
-                Try again
-              </button>
-            )}
+            {code && <Button onClick={submit}>Try again</Button>}
           </>
         )}
       </div>

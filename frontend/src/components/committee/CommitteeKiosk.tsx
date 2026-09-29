@@ -13,13 +13,13 @@ export default function CommitteeKiosk() {
   const [error, setError] = useState('')
 
   async function load() {
-    try {
-      setError('')
-      setDevices(await listKioskDevices())
-      setBar(await getBarStatus())
-    } catch (e) {
-      setError(msg(e))
-    }
+    setError('')
+    // Independent: a failing device list shouldn't hide the bar status, or vice versa.
+    const [devicesResult, barResult] = await Promise.allSettled([listKioskDevices(), getBarStatus()])
+    if (devicesResult.status === 'fulfilled') setDevices(devicesResult.value)
+    if (barResult.status === 'fulfilled') setBar(barResult.value)
+    const failed = [devicesResult, barResult].find((r): r is PromiseRejectedResult => r.status === 'rejected')
+    if (failed) setError(msg(failed.reason))
   }
 
   useEffect(() => {

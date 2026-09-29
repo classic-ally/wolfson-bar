@@ -1,9 +1,16 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { kioskPairApprove } from '../../lib/auth'
+import { getKioskPairingInfo, kioskPairApprove } from '../../lib/auth'
+import type { PairingInfo } from '../../types/PairingInfo'
 
 // Committee-only approve screen, reached by scanning the kiosk's pairing QR.
 type State = 'idle' | 'approving' | 'done' | 'error'
+
+/** Server timestamps are UTC `YYYY-MM-DD HH:MM:SS`; show them in the viewer's time. */
+function formatUtc(ts: string): string {
+  const d = new Date(ts.replace(' ', 'T') + 'Z')
+  return Number.isNaN(d.getTime()) ? ts : d.toLocaleString()
+}
 
 export default function CommitteeKioskPair() {
   const [params] = useSearchParams()
@@ -11,6 +18,14 @@ export default function CommitteeKioskPair() {
   const [name, setName] = useState('Bar till PC')
   const [state, setState] = useState<State>('idle')
   const [error, setError] = useState('')
+  const [info, setInfo] = useState<PairingInfo | null>(null)
+
+  useEffect(() => {
+    if (!code) return
+    getKioskPairingInfo(code)
+      .then(setInfo)
+      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load pairing'))
+  }, [code])
 
   async function approve() {
     setState('approving')
@@ -45,8 +60,25 @@ export default function CommitteeKioskPair() {
         <>
           <p style={{ color: '#666' }}>
             Approve this screen as a trusted kiosk. Only do this for the bar's own
-            computer.
+            computer, while you're standing in front of it.
           </p>
+          {info && (
+            <dl data-testid="pairing-info" style={{ color: '#444', margin: '12px 0' }}>
+              <dt style={{ fontWeight: 600 }}>Requested</dt>
+              <dd style={{ margin: '0 0 8px' }}>{formatUtc(info.created_at)}</dd>
+              <dt style={{ fontWeight: 600 }}>From</dt>
+              <dd style={{ margin: '0 0 8px' }}>{info.client_ip ?? 'unknown address'}</dd>
+              <dt style={{ fontWeight: 600 }}>Browser</dt>
+              <dd style={{ margin: '0 0 8px', wordBreak: 'break-word' }}>
+                {info.user_agent ?? 'unknown'}
+              </dd>
+            </dl>
+          )}
+          {info && info.active_devices > 0 && (
+            <p role="alert" style={{ color: '#b45309' }}>
+              Approving replaces the current kiosk — it will stop showing check-in codes.
+            </p>
+          )}
           <label style={{ display: 'block', marginBottom: 8 }}>
             Device name
             <input
