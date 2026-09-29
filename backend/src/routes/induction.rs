@@ -11,6 +11,9 @@ use crate::auth::{AuthenticatedUser, CommitteeUser};
 use crate::models::ErrorResponse;
 use crate::routes::auth::AppState;
 
+/// Maximum inductees per induction session.
+pub const INDUCTION_CAPACITY: i64 = 4;
+
 // ===== Induction Availability (Committee) =====
 
 /// Committee member marks themselves available for induction on a date
@@ -204,7 +207,7 @@ pub async fn get_induction_dates(
         let entry = date_map.entry(row.shift_date.clone()).or_insert(InductionDate {
             date: row.shift_date.clone(),
             has_full_shift_committee: false,
-            slots_remaining: 4 - *count_map.get(&row.shift_date).unwrap_or(&0) as i32,
+            slots_remaining: INDUCTION_CAPACITY as i32 - *count_map.get(&row.shift_date).unwrap_or(&0) as i32,
             user_signed_up: user_signup.as_ref().map_or(false, |(d, _)| d == &row.shift_date),
             user_signed_up_full_shift: user_signup.as_ref().map_or(false, |(d, f)| d == &row.shift_date && *f),
             inductees: inductees_by_date.remove(&row.shift_date).unwrap_or_default(),
@@ -275,7 +278,7 @@ pub async fn signup_for_induction(
         return Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "No induction available on this date".to_string() })));
     }
 
-    // Check capacity (max 4)
+    // Check capacity
     let current_count: (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM induction_signups WHERE shift_date = ?"
     )
@@ -284,8 +287,8 @@ pub async fn signup_for_induction(
     .await
     .unwrap_or((0,));
 
-    if current_count.0 >= 4 {
-        return Err((StatusCode::CONFLICT, Json(ErrorResponse { error: "This induction session is full (max 4 inductees)".to_string() })));
+    if current_count.0 >= INDUCTION_CAPACITY {
+        return Err((StatusCode::CONFLICT, Json(ErrorResponse { error: format!("This induction session is full (max {INDUCTION_CAPACITY} inductees)") })));
     }
 
     // If full_shift requested, verify committee member is on the full shift
@@ -307,20 +310,41 @@ pub async fn signup_for_induction(
         }
     }
 
-    sqlx::query("INSERT INTO induction_signups (shift_date, user_id, full_shift) VALUES (?, ?, ?)")
+    // The checks above give friendly errors, but a concurrent request can slip
+    // in between them and the insert. Re-check capacity and the one-signup rule
+    // inside the insert itself: a single SQLite statement is atomic.
+    let inserted = sqlx::query(
+        "INSERT INTO induction_signups (shift_date, user_id, full_shift)
+         SELECT ?1, ?2, ?3
+         WHERE (SELECT COUNT(*) FROM induction_signups WHERE shift_date = ?1) < ?4
+           AND NOT EXISTS (SELECT 1 FROM induction_signups WHERE user_id = ?2)"
+    )
         .bind(&date)
         .bind(&user.id)
         .bind(req.full_shift)
+        .bind(INDUCTION_CAPACITY)
         .execute(&state.db)
         .await
         .map_err(|e| {
-            if e.to_string().contains("UNIQUE constraint") {
-                (StatusCode::CONFLICT, Json(ErrorResponse { error: "You are already signed up for this induction".to_string() }))
-            } else {
-                error!("Failed to create induction signup: {}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Failed to sign up".to_string() }))
-            }
+            error!("Failed to create induction signup: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Failed to sign up".to_string() }))
         })?;
+
+    if inserted.rows_affected() == 0 {
+        let already_signed_up: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM induction_signups WHERE user_id = ?)"
+        )
+        .bind(&user.id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(false);
+        let error = if already_signed_up {
+            "You are already signed up for an induction. Cancel that signup first.".to_string()
+        } else {
+            format!("This induction session is full (max {INDUCTION_CAPACITY} inductees)")
+        };
+        return Err((StatusCode::CONFLICT, Json(ErrorResponse { error })));
+    }
 
     info!("User {} signed up for induction on {} (full_shift: {})", user.id, date, req.full_shift);
     Ok(StatusCode::OK)
@@ -419,4 +443,108 @@ pub async fn get_pending_induction_approvals(
     .collect();
 
     Ok(Json(approvals))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::User;
+    use crate::test_util::{insert_user, json_post, test_state, token_for, user_with, user_with_role};
+    use axum::routing::post;
+    use axum::Router;
+    use tokio::task::JoinSet;
+    use tower::ServiceExt;
+
+    const DATE: &str = "2026-06-24";
+    const OTHER_DATE: &str = "2026-06-25";
+
+    fn build_app(state: AppState) -> Router {
+        Router::new()
+            .route("/api/shifts/:date/induction-signup", post(signup_for_induction))
+            .with_state(state)
+    }
+
+    async fn offer_induction(state: &AppState, date: &str) {
+        let committee = user_with_role(true, false);
+        insert_user(&state.db, &committee).await;
+        sqlx::query("INSERT INTO induction_availability (shift_date, committee_user_id) VALUES (?, ?)")
+            .bind(date)
+            .bind(&committee.id)
+            .execute(&state.db)
+            .await
+            .unwrap();
+    }
+
+    async fn new_inductee(state: &AppState) -> User {
+        let u = user_with(false, false, false, false);
+        insert_user(&state.db, &u).await;
+        u
+    }
+
+    async fn signup_count(state: &AppState, date: &str) -> i64 {
+        sqlx::query_scalar("SELECT COUNT(*) FROM induction_signups WHERE shift_date = ?")
+            .bind(date)
+            .fetch_one(&state.db)
+            .await
+            .unwrap()
+    }
+
+    fn signup_req(state: &AppState, user: &User, date: &str) -> axum::http::Request<axum::body::Body> {
+        json_post(
+            &format!("/api/shifts/{date}/induction-signup"),
+            serde_json::json!({ "full_shift": false }),
+            Some(&token_for(state, user)),
+            None,
+        )
+    }
+
+    // Impact: regression guard; the capacity check and insert used to be separate
+    // queries, so simultaneous signups could all pass the check and overfill a session.
+    // Should: accept exactly as many concurrent signups as the session has places.
+    // Should: reject the rest as full.
+    #[tokio::test]
+    async fn concurrent_signups_do_not_exceed_capacity() {
+        let state = test_state().await;
+        offer_induction(&state, DATE).await;
+
+        let mut set = JoinSet::new();
+        for _ in 0..INDUCTION_CAPACITY + 2 {
+            let user = new_inductee(&state).await;
+            let req = signup_req(&state, &user, DATE);
+            let app = build_app(state.clone());
+            set.spawn(async move { app.oneshot(req).await.unwrap().status() });
+        }
+        let statuses = set.join_all().await;
+
+        let ok = statuses.iter().filter(|s| **s == StatusCode::OK).count() as i64;
+        assert_eq!(ok, INDUCTION_CAPACITY);
+        assert!(statuses.iter().all(|s| *s == StatusCode::OK || *s == StatusCode::CONFLICT));
+        assert_eq!(signup_count(&state, DATE).await, INDUCTION_CAPACITY);
+    }
+
+    // Impact: regression guard; the one-signup-per-inductee check was also
+    // separate from the insert, so parallel requests could book two dates.
+    // Should: keep an inductee to a single induction date under concurrent requests.
+    #[tokio::test]
+    async fn concurrent_signups_by_one_user_book_only_one_date() {
+        let state = test_state().await;
+        offer_induction(&state, DATE).await;
+        offer_induction(&state, OTHER_DATE).await;
+        let user = new_inductee(&state).await;
+
+        let mut set = JoinSet::new();
+        for date in [DATE, OTHER_DATE] {
+            let req = signup_req(&state, &user, date);
+            let app = build_app(state.clone());
+            set.spawn(async move { app.oneshot(req).await.unwrap().status() });
+        }
+        set.join_all().await;
+
+        let booked: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM induction_signups WHERE user_id = ?")
+            .bind(&user.id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap();
+        assert_eq!(booked, 1);
+    }
 }
