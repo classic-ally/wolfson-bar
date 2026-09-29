@@ -352,7 +352,7 @@ pub async fn cancel_induction_signup(
 
 // ===== Admin: Mark Supervised Shift =====
 
-/// Mark a user's supervised shift as complete (committee members approve their own inductees)
+/// Mark a user's supervised shift as complete (any committee member may approve)
 pub async fn admin_mark_supervised(
     State(state): State<AppState>,
     CommitteeUser(approver): CommitteeUser,

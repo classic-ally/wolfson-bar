@@ -879,10 +879,7 @@ pub async fn delete_user(
 
     info!("🗑️ Admin {} deleting user {}", admin.id, target_user_id);
 
-    // Delete the user
-    sqlx::query("DELETE FROM users WHERE id = ?")
-        .bind(&target_user_id)
-        .execute(&state.db)
+    crate::routes::users::delete_user_account(&state.db, &target_user_id)
         .await
         .map_err(|e| {
             error!("❌ Failed to delete user: {}", e);
@@ -899,7 +896,7 @@ pub async fn delete_user(
     Ok(StatusCode::OK)
 }
 
-/// Mark a user's induction as complete (committee members approve their own inductees)
+/// Mark a user's induction as complete (any committee member may approve)
 pub async fn admin_mark_induction(
     State(state): State<AppState>,
     CommitteeUser(approver): CommitteeUser,
