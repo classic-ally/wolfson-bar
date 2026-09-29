@@ -36,7 +36,7 @@
 
             cargoDeps = rustPlatform.fetchCargoVendor {
               src = ./backend;
-              hash = "sha256-Hjf4XbzkaSVi4zqZZPe6U/bmCHs4cDqn7FBHaKKzU3E=";
+              hash = "sha256-dua816dViyN+MLcRBTdLKt4zZKu+7bazOrS2Rq1fJG0=";
             };
 
             nativeBuildInputs = [
@@ -67,7 +67,7 @@
               version = "0.1.0";
               src = ./frontend;
               fetcherVersion = 4;
-              hash = "sha256-fqzPogGtDPzBOznRIk4P+5DvXVAfM0mpNp9kmGhdCjQ=";
+              hash = "sha256-QeAX95ZuDeopPMaSILEUEg5cS5fC98x4c15D5k33h8s=";
             };
 
             nativeBuildInputs = [ pkgs.nodejs pkgs.pnpm pkgs.pnpmConfigHook ];
@@ -83,6 +83,16 @@
               # types are already in place via preBuild above.
               pnpm exec vite build
               runHook postBuild
+            '';
+
+            # Unit tests + typecheck gate the build. The Storybook browser
+            # suite needs Playwright's Chromium, so it runs in CI instead.
+            doCheck = true;
+            checkPhase = ''
+              runHook preCheck
+              pnpm exec tsc --noEmit -p tsconfig.json
+              pnpm exec vitest run --project unit
+              runHook postCheck
             '';
 
             installPhase = ''
@@ -102,7 +112,12 @@
             nativeBuildInputs = [ pkgs.pkg-config ];
             buildInputs = [ pkgs.openssl ];
 
-            doCheck = false;
+            # Full test suite gates the build. ts-rs export tests would write
+            # into ../frontend (outside the source tree); keep them in $TMPDIR.
+            doCheck = true;
+            preCheck = ''
+              export TS_RS_EXPORT_DIR=$TMPDIR/ts-bindings
+            '';
           };
 
           # Runtime bundle with binary, migrations, and frontend assets
