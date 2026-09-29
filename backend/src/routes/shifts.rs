@@ -13,6 +13,34 @@ use crate::models::ErrorResponse;
 use crate::routes::auth::AppState;
 use crate::constants::{DEFAULT_SHIFT_MAX_VOLUNTEERS, DEFAULT_SHIFT_REQUIRES_CONTRACT};
 
+/// Staffing rules for a shift date: the highest capacity and the strictest
+/// contract rule across all events on that date, else the defaults.
+pub struct ShiftRequirements {
+    pub max_volunteers: i32,
+    pub requires_contract: bool,
+}
+
+pub async fn shift_requirements<'e, E: sqlx::SqliteExecutor<'e>>(
+    db: E,
+    date: &str,
+) -> Result<ShiftRequirements, sqlx::Error> {
+    let events = sqlx::query_as::<_, (Option<i32>, Option<bool>)>(
+        "SELECT shift_max_volunteers, shift_requires_contract FROM events WHERE event_date = ?",
+    )
+    .bind(date)
+    .fetch_all(db)
+    .await?;
+
+    Ok(ShiftRequirements {
+        max_volunteers: events
+            .iter()
+            .filter_map(|(max, _)| *max)
+            .fold(DEFAULT_SHIFT_MAX_VOLUNTEERS, i32::max),
+        requires_contract: DEFAULT_SHIFT_REQUIRES_CONTRACT
+            || events.iter().any(|(_, contract)| *contract == Some(true)),
+    })
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ShiftsQuery {
     pub start_date: String,
@@ -351,47 +379,17 @@ pub async fn signup_for_shift(
         }
     }
 
-    // Get all events for this date to check requirements (use highest)
-    #[derive(sqlx::FromRow)]
-    struct EventRequirements {
-        shift_max_volunteers: Option<i32>,
-        shift_requires_contract: Option<bool>,
-    }
-
-    let events = sqlx::query_as::<_, EventRequirements>(
-        "SELECT shift_max_volunteers, shift_requires_contract
-         FROM events WHERE event_date = ?"
-    )
-    .bind(&date)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| {
-        error!("❌ Failed to fetch events: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: "Failed to fetch events".to_string(),
-            }),
-        )
-    })?;
-
-    // Use highest requirements from all events on this date
-    let mut requires_contract = DEFAULT_SHIFT_REQUIRES_CONTRACT;
-    let mut max_volunteers = DEFAULT_SHIFT_MAX_VOLUNTEERS;
-
-    for event in &events {
-        // Use the highest max_volunteers if specified
-        if let Some(event_max) = event.shift_max_volunteers {
-            if event_max > max_volunteers {
-                max_volunteers = event_max;
-            }
-        }
-
-        // If any event requires contract, the shift requires contract
-        if let Some(true) = event.shift_requires_contract {
-            requires_contract = true;
-        }
-    }
+    let ShiftRequirements { max_volunteers, requires_contract } = shift_requirements(&state.db, &date)
+        .await
+        .map_err(|e| {
+            error!("❌ Failed to fetch events: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to fetch events".to_string(),
+                }),
+            )
+        })?;
 
     // Check contract requirement
     if requires_contract && !user.has_contract {
@@ -566,43 +564,17 @@ pub async fn admin_assign_to_shift(
             )
         })?;
 
-    // Get all events for this date to check requirements
-    #[derive(sqlx::FromRow)]
-    struct EventRequirements {
-        shift_max_volunteers: Option<i32>,
-        shift_requires_contract: Option<bool>,
-    }
-
-    let events = sqlx::query_as::<_, EventRequirements>(
-        "SELECT shift_max_volunteers, shift_requires_contract
-         FROM events WHERE event_date = ?"
-    )
-    .bind(&date)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| {
-        error!("❌ Failed to fetch events: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: "Failed to fetch events".to_string(),
-            }),
-        )
-    })?;
-
-    let mut requires_contract = DEFAULT_SHIFT_REQUIRES_CONTRACT;
-    let mut max_volunteers = DEFAULT_SHIFT_MAX_VOLUNTEERS;
-
-    for event in &events {
-        if let Some(event_max) = event.shift_max_volunteers {
-            if event_max > max_volunteers {
-                max_volunteers = event_max;
-            }
-        }
-        if let Some(true) = event.shift_requires_contract {
-            requires_contract = true;
-        }
-    }
+    let ShiftRequirements { max_volunteers, requires_contract } = shift_requirements(&state.db, &date)
+        .await
+        .map_err(|e| {
+            error!("❌ Failed to fetch events: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to fetch events".to_string(),
+                }),
+            )
+        })?;
 
     // Check target user's contract status if required
     if requires_contract {

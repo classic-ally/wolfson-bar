@@ -165,7 +165,16 @@ impl FromRequestParts<AppState> for KioskDevice {
         .bind(&hash)
         .fetch_optional(&state.db)
         .await
-        .map_err(|_| unauthorized())?
+        .map_err(|e| {
+            // Not a 401: the kiosk treats 401 as "revoked" and discards its token.
+            tracing::error!("kiosk device lookup failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Internal error".to_string(),
+                }),
+            )
+        })?
         .ok_or_else(unauthorized)?;
 
         // Best-effort liveness stamp; failure here must not block the request.

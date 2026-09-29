@@ -87,6 +87,7 @@ pub struct AppState {
     pub kiosk_secret: Vec<u8>,
     pub email_service: Option<crate::email::EmailService>,
     pub public_url: String,
+    pub clock: crate::clock::Clock,
 }
 
 // Registration Start - Generate challenge
