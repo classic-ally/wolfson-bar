@@ -7,6 +7,7 @@ import CommitteeLayout from './components/CommitteeLayout'
 import AdminLayout from './components/AdminLayout'
 import AdminUsers from './components/admin/AdminUsers'
 import AdminBulkImport from './components/admin/AdminBulkImport'
+import AdminCodeOfConduct from './components/admin/AdminCodeOfConduct'
 import CommitteeOverview from './components/committee/CommitteeOverview'
 import CommitteeEvents from './components/committee/CommitteeEvents'
 import CommitteeHours from './components/committee/CommitteeHours'
@@ -418,6 +419,7 @@ function App() {
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<AdminUsers />} />
             <Route path="import" element={<AdminBulkImport />} />
+            <Route path="coc" element={<AdminCodeOfConduct />} />
           </Route>
         </Routes>
         <Footer />

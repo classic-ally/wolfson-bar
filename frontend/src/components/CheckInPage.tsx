@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useLocation, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import Page from './Page'
 import SignInModal from './auth/SignInModal'
 import { Button } from '@/components/ui/button'
@@ -16,6 +16,8 @@ export default function CheckInPage() {
   const code = params.get('code') || ''
   const [state, setState] = useState<State>('idle')
   const [message, setMessage] = useState('')
+  // 403: onboarding incomplete (typically a Code of Conduct to re-sign).
+  const [forbidden, setForbidden] = useState(false)
   const [result, setResult] = useState<CheckInResponse | null>(null)
   const [signInOpen, setSignInOpen] = useState(false)
 
@@ -30,6 +32,7 @@ export default function CheckInPage() {
         setState('expired')
         return
       }
+      setForbidden(e instanceof AuthError && e.status === 403)
       setMessage(e instanceof Error ? e.message : 'Check-in failed')
       setState('error')
     }
@@ -96,7 +99,15 @@ export default function CheckInPage() {
           <>
             <h2 style={{ color: '#dc3545' }}>Couldn't check you in</h2>
             <p style={{ color: '#666' }}>{message}</p>
-            {code && <Button onClick={submit}>Try again</Button>}
+            <div className="mt-4">
+              {forbidden ? (
+                <Button asChild>
+                  <Link to="/profile/induction">Go to your onboarding checklist</Link>
+                </Button>
+              ) : (
+                code && <Button onClick={submit}>Try again</Button>
+              )}
+            </div>
           </>
         )}
       </div>

@@ -13,6 +13,7 @@ use ts_rs::TS;
 use crate::auth::{CommitteeUser, AdminUser};
 use crate::models::{ErrorResponse, User, IS_ROTA_MEMBER_SQL};
 use crate::routes::auth::{AppState, create_user_in_db};
+use crate::routes::coc::{current_coc_version, record_signature};
 
 mod exports;
 pub use exports::{export_members_csv, export_shift_history_csv};
@@ -537,6 +538,9 @@ pub struct OverviewStats {
     pub understaffed_events_next_7_days: i64,
     #[ts(type = "number")]
     pub expiring_contracts_next_30_days: i64,
+    /// Members who signed an earlier CoC and haven't re-signed the latest one.
+    #[ts(type = "number")]
+    pub coc_resign_pending_count: i64,
 }
 
 /// Get dashboard overview stats (committee only)
@@ -610,6 +614,15 @@ pub async fn get_overview_stats(
     .await
     .unwrap_or(0);
 
+    let coc_resign_pending_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM users
+         WHERE code_of_conduct_version IS NOT NULL
+         AND code_of_conduct_signed = FALSE"
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
+
     Ok(Json(OverviewStats {
         active_members_count,
         pending_certificates_count,
@@ -617,6 +630,7 @@ pub async fn get_overview_stats(
         unstaffed_shifts_next_3_days,
         understaffed_events_next_7_days,
         expiring_contracts_next_30_days,
+        coc_resign_pending_count,
     }))
 }
 
@@ -931,7 +945,8 @@ pub async fn admin_mark_induction(
     Ok(StatusCode::OK)
 }
 
-/// Mark a user's code of conduct as signed (admin only)
+/// Mark a user's code of conduct as signed (admin only). Records the current
+/// version. Admins can't mark themselves: they sign the text like everyone else.
 pub async fn admin_mark_coc(
     State(state): State<AppState>,
     AdminUser(admin): AdminUser,
@@ -939,21 +954,33 @@ pub async fn admin_mark_coc(
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
     info!("✅ Admin {} marking CoC signed for user {}", admin.id, target_user_id);
 
-    let result = sqlx::query("UPDATE users SET code_of_conduct_signed = TRUE WHERE id = ?")
-        .bind(&target_user_id)
-        .execute(&state.db)
-        .await
-        .map_err(|e| {
-            error!("❌ Failed to mark CoC: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: "Failed to mark code of conduct signed".to_string(),
-                }),
-            )
-        })?;
+    if target_user_id == admin.id {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "Sign the Code of Conduct from your own profile".to_string(),
+            }),
+        ));
+    }
 
-    if result.rows_affected() == 0 {
+    let internal = |e: sqlx::Error| {
+        error!("❌ Failed to mark CoC: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "Failed to mark code of conduct signed".to_string(),
+            }),
+        )
+    };
+
+    let mut tx = state.db.begin().await.map_err(internal)?;
+    let current = current_coc_version(&mut *tx).await.map_err(internal)?;
+    let rows = record_signature(&mut *tx, &target_user_id, current, state.clock.now())
+        .await
+        .map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
+
+    if rows == 0 {
         return Err((
             StatusCode::NOT_FOUND,
             Json(ErrorResponse {
@@ -962,7 +989,7 @@ pub async fn admin_mark_coc(
         ));
     }
 
-    info!("✅ CoC marked signed for user {}", target_user_id);
+    info!("✅ CoC v{} marked signed for user {}", current, target_user_id);
     Ok(StatusCode::OK)
 }
 
@@ -1777,4 +1804,84 @@ mod tests {
         assert_eq!(stored_type(&state, &target.id).await, None);
     }
 
+}
+
+#[cfg(test)]
+mod coc_tests {
+    use super::*;
+    use crate::test_util::{insert_user, test_state, user_with, user_with_role};
+
+    fn admin() -> User {
+        let mut u = user_with_role(true, true);
+        u.code_of_conduct_signed = true;
+        u
+    }
+
+    // Should not: let an admin mark their own Code of Conduct as signed.
+    #[tokio::test]
+    async fn admin_cannot_mark_own_coc() {
+        let state = test_state().await;
+        let mut admin = user_with_role(true, true);
+        admin.id = "admin-self".into();
+        insert_user(&state.db, &admin).await;
+
+        let (status, _) = admin_mark_coc(State(state.clone()), AdminUser(admin.clone()), Path(admin.id.clone()))
+            .await
+            .unwrap_err();
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let signed: bool = sqlx::query_scalar("SELECT code_of_conduct_signed FROM users WHERE id = ?")
+            .bind(&admin.id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap();
+        assert!(!signed);
+    }
+
+    // Should: record the current version when an admin marks another member as signed.
+    #[tokio::test]
+    async fn admin_mark_records_current_version() {
+        let state = test_state().await;
+        sqlx::query("INSERT INTO coc_versions (version, body) VALUES (2, 'v2')")
+            .execute(&state.db)
+            .await
+            .unwrap();
+        let admin = admin();
+        let mut target = user_with(true, false, true, true);
+        target.id = "target-coc".into();
+        insert_user(&state.db, &admin).await;
+        insert_user(&state.db, &target).await;
+
+        admin_mark_coc(State(state.clone()), AdminUser(admin), Path(target.id.clone()))
+            .await
+            .unwrap();
+        let (signed, version): (bool, Option<i64>) = sqlx::query_as(
+            "SELECT code_of_conduct_signed, code_of_conduct_version FROM users WHERE id = ?",
+        )
+        .bind(&target.id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+        assert_eq!((signed, version), (true, Some(2)));
+    }
+
+    // Should: count members who signed an earlier version but not the latest as pending re-signs.
+    // Should not: count members who have never signed as pending re-signs.
+    #[tokio::test]
+    async fn overview_counts_pending_resigns() {
+        let state = test_state().await;
+        let reset = user_with(true, true, true, true);
+        let never = user_with(true, false, true, true);
+        let current = user_with(true, true, true, true);
+        for u in [&reset, &never, &current] {
+            insert_user(&state.db, u).await;
+        }
+        sqlx::query("UPDATE users SET code_of_conduct_signed = FALSE WHERE id = ?")
+            .bind(&reset.id)
+            .execute(&state.db)
+            .await
+            .unwrap();
+
+        let Json(stats) = get_overview_stats(State(state), CommitteeUser(admin())).await.unwrap();
+        assert_eq!(stats.coc_resign_pending_count, 1);
+    }
 }

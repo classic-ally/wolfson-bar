@@ -162,14 +162,17 @@ def seed_users(con: sqlite3.Connection) -> list[dict]:
             INSERT INTO users (
                 id, display_name, passkey_credential,
                 is_committee, is_admin,
-                code_of_conduct_signed, food_safety_completed,
+                code_of_conduct_signed, code_of_conduct_version,
+                food_safety_completed,
                 food_safety_certificate, food_safety_certificate_type,
                 induction_completed, has_contract, contract_expiry_date,
                 created_at, email, email_notifications_enabled,
                 privacy_consent_given, supervised_shift_completed
-            ) VALUES (?, ?, NULL, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, 0, 1, ?)
+            ) VALUES (?, ?, NULL, ?, ?, ?,
+                      (SELECT MAX(version) FROM coc_versions) * ?,
+                      ?, NULL, NULL, ?, ?, ?, ?, ?, 0, 1, ?)
             """,
-            (uid, name, is_committee, is_admin, coc, food,
+            (uid, name, is_committee, is_admin, coc, 1 if coc else None, food,
              induction, has_contract, contract_expiry, now, email, supervised),
         )
         members.append({

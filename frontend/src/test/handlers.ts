@@ -133,8 +133,23 @@ export const fixtureTermWeeks: TermWeek[] = [
   { summary: '5th Week, Trinity Term', start_date: '2026-05-31', end_date: '2026-06-07' },
 ]
 
+function overviewHandler(cocResignPending: number) {
+  return http.get('*/api/admin/overview', () =>
+    HttpResponse.json({
+      active_members_count: 8,
+      pending_certificates_count: 0,
+      pending_contracts_count: 0,
+      unstaffed_shifts_next_3_days: 0,
+      understaffed_events_next_7_days: 0,
+      expiring_contracts_next_30_days: 0,
+      coc_resign_pending_count: cocResignPending,
+    }),
+  )
+}
+
 /** Default handler set covering the rota-manager flow. */
 export const defaultHandlers = [
+  overviewHandler(0),
   http.get('*/api/admin/unallocated-users', () =>
     HttpResponse.json(fixtureUnallocated),
   ),
@@ -148,16 +163,46 @@ export const defaultHandlers = [
 
 /** Empty unallocated list — for the "all sorted" story. */
 export const emptyUnallocatedHandlers = [
+  overviewHandler(0),
   http.get('*/api/admin/unallocated-users', () => HttpResponse.json([])),
   http.get('*/api/shifts', () => HttpResponse.json(fixtureShifts)),
   http.get('*/api/events', () => HttpResponse.json(fixtureEvents)),
   http.get('*/api/term-weeks', () => HttpResponse.json(fixtureTermWeeks)),
 ]
 
+/** Nobody listed because a new CoC was just published and nobody has re-signed. */
+export const cocResetHandlers = [
+  overviewHandler(11),
+  ...emptyUnallocatedHandlers.slice(1),
+]
+
 /** Hangs forever — for the loading-state story. */
 export const loadingHandlers = [
+  overviewHandler(0),
   http.get('*/api/admin/unallocated-users', () => new Promise(() => {})),
   http.get('*/api/shifts', () => HttpResponse.json(fixtureShifts)),
   http.get('*/api/events', () => HttpResponse.json(fixtureEvents)),
   http.get('*/api/term-weeks', () => HttpResponse.json(fixtureTermWeeks)),
+]
+
+const sampleCoc = [
+  '# Wolfson Cellar Bar - Code of Conduct',
+  '',
+  'ALL trained Rota Members MUST read and accept the following Code of Conduct.',
+  '',
+  "## Members' Understanding",
+  '',
+  ...Array.from({ length: 30 }, (_, i) => `- Rule ${i + 1}: behave responsibly behind the bar.`),
+  '',
+  '---',
+  '',
+  '**I confirm that I have read, understood, and agree to abide by the above Code of Conduct.**',
+].join('\n')
+
+/** Current CoC + successful acceptance. Spread into stories that replace the default handlers. */
+export const cocHandlers = [
+  http.get('*/api/coc/current', () =>
+    HttpResponse.json({ version: 2, body: sampleCoc, published_at: '2026-09-01 12:00:00' }),
+  ),
+  http.post('*/api/users/me/accept-coc', () => new HttpResponse(null, { status: 200 })),
 ]

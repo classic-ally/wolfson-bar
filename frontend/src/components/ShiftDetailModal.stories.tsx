@@ -37,6 +37,7 @@ function makeUser(overrides: Partial<UserStatus> = {}): UserStatus {
     display_name: 'Test User',
     is_committee: false,
     code_of_conduct_signed: true,
+    code_of_conduct_version: 1,
     food_safety_completed: true,
     has_food_safety_certificate: true,
     induction_completed: true,

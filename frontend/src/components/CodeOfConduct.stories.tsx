@@ -2,6 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import CodeOfConduct from './CodeOfConduct'
 import { Button } from '@/components/ui/button'
+import { http, HttpResponse } from 'msw'
+import { cocHandlers } from '@/test/handlers'
 
 const meta = {
   title: 'Onboarding/CodeOfConduct',
@@ -25,14 +27,8 @@ function Wrapper({ readOnly = false, startOpen = true }: { readOnly?: boolean; s
         open={open}
         onOpenChange={setOpen}
         readOnly={readOnly}
-        onAccept={() => {
-          alert('Accepted')
-          setOpen(false)
-        }}
-        onDecline={() => {
-          alert('Declined')
-          setOpen(false)
-        }}
+        onAccept={() => setOpen(false)}
+        onDecline={() => setOpen(false)}
       />
     </div>
   )
@@ -44,4 +40,22 @@ export const AcceptFlow: Story = {
 
 export const ReadOnly: Story = {
   render: () => <Wrapper readOnly />,
+}
+
+/** A newer version was published while this one was open: accept returns 409. */
+export const StaleVersion: Story = {
+  render: () => <Wrapper />,
+  parameters: {
+    msw: {
+      handlers: [
+        http.post('*/api/users/me/accept-coc', () =>
+          HttpResponse.json(
+            { error: 'The Code of Conduct has been updated — please re-read it' },
+            { status: 409 },
+          ),
+        ),
+        ...cocHandlers,
+      ],
+    },
+  },
 }

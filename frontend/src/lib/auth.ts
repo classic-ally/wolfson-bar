@@ -22,6 +22,9 @@ import type { KioskDeviceInfo } from '../types/KioskDeviceInfo'
 import type { PairStartResponse } from '../types/PairStartResponse'
 import type { PairStatusResponse } from '../types/PairStatusResponse'
 import type { PairingInfo } from '../types/PairingInfo'
+import type { CocVersion } from '../types/CocVersion'
+import type { CocVersionSummary } from '../types/CocVersionSummary'
+import type { PublishCocResponse } from '../types/PublishCocResponse'
 import { consumeReturnTo } from './returnTo'
 
 const API_BASE = window.location.origin
@@ -254,6 +257,11 @@ export function isRotaMember(u: RotaPredicateFields): boolean {
   return canSignupForShifts(u) && u.supervised_shift_completed
 }
 
+// Signed an earlier Code of Conduct but not the one published since.
+export function needsCocResign(u: Pick<UserStatus, 'code_of_conduct_signed' | 'code_of_conduct_version'>): boolean {
+  return !u.code_of_conduct_signed && u.code_of_conduct_version !== null
+}
+
 /**
  * Get current user's status
  */
@@ -268,18 +276,39 @@ export async function getUserStatus(): Promise<UserStatus> {
   return response.json()
 }
 
+export const USER_STATUS_CHANGED = 'user-status-changed'
+
+/** Tell mounted views (e.g. the onboarding nudge bar) to refetch the user's status. */
+export function notifyUserStatusChanged(): void {
+  window.dispatchEvent(new CustomEvent(USER_STATUS_CHANGED))
+}
+
 /**
- * Accept Code of Conduct
+ * The Code of Conduct members are currently asked to sign. Public.
  */
-export async function acceptCodeOfConduct(): Promise<void> {
+export async function getCurrentCoc(): Promise<CocVersion> {
+  const response = await fetch(`${API_BASE}/api/coc/current`)
+  if (!response.ok) {
+    throw await responseError(response, 'Failed to load Code of Conduct')
+  }
+  return response.json()
+}
+
+/**
+ * Accept the given Code of Conduct version. Throws AuthError with status 409
+ * if a newer version was published in the meantime.
+ */
+export async function acceptCodeOfConduct(version: number): Promise<void> {
   const response = await authenticatedFetch(`${API_BASE}/api/users/me/accept-coc`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ version }),
   })
 
   if (!response.ok) {
-    const error = await response.json()
-    throw new AuthError(error.error || 'Failed to accept Code of Conduct')
+    throw await responseError(response, 'Failed to accept Code of Conduct')
   }
+  notifyUserStatusChanged()
 }
 
 /**
@@ -306,6 +335,7 @@ export async function uploadCertificate(file: File): Promise<void> {
     const error = await response.json()
     throw new AuthError(error.error || 'Failed to upload certificate')
   }
+  notifyUserStatusChanged()
 }
 
 
@@ -995,6 +1025,32 @@ export async function markCoC(userId: string): Promise<void> {
     const error = await response.json()
     throw new AuthError(error.error || 'Failed to mark code of conduct signed')
   }
+}
+
+/**
+ * Publish a new Code of Conduct version; every member must re-sign (admin only)
+ */
+export async function publishCoc(body: string): Promise<PublishCocResponse> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/coc`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body }),
+  })
+  if (!response.ok) {
+    throw await responseError(response, 'Failed to publish Code of Conduct')
+  }
+  return response.json()
+}
+
+/**
+ * Code of Conduct publication history, newest first (admin only)
+ */
+export async function getCocVersions(): Promise<CocVersionSummary[]> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/coc/versions`)
+  if (!response.ok) {
+    throw await responseError(response, 'Failed to load Code of Conduct history')
+  }
+  return response.json()
 }
 
 /**

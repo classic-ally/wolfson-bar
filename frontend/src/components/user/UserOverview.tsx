@@ -32,6 +32,8 @@ export default function UserOverview() {
     switch (step) {
       case 'code_of_conduct':
         return { main: 'Incomplete', subtitle: 'Sign Code of Conduct' }
+      case 'code_of_conduct_resign':
+        return { main: 'Incomplete', subtitle: 'Re-sign updated Code of Conduct' }
       case 'food_safety':
         return { main: 'Incomplete', subtitle: 'Upload Food Safety Certificate' }
       case 'induction':

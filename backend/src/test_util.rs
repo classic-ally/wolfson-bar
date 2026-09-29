@@ -116,15 +116,19 @@ pub async fn body_json(res: axum::response::Response) -> serde_json::Value {
 pub async fn insert_user(db: &SqlitePool, user: &User) {
     sqlx::query(
         "INSERT INTO users (id, display_name, passkey_credential, is_committee, is_admin,
-         code_of_conduct_signed, food_safety_completed, induction_completed, has_contract,
-         contract_expiry_date, created_at, supervised_shift_completed)
-         VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?)"
+         code_of_conduct_signed, code_of_conduct_version, food_safety_completed,
+         induction_completed, has_contract, contract_expiry_date, created_at,
+         supervised_shift_completed)
+         VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)"
     )
     .bind(&user.id)
     .bind(&user.display_name)
     .bind(user.is_committee)
     .bind(user.is_admin)
     .bind(user.code_of_conduct_signed)
+    // Signed users default to the seeded version 1, keeping the flag and
+    // version consistent as they are in production.
+    .bind(user.code_of_conduct_version.or(user.code_of_conduct_signed.then_some(1)))
     .bind(user.food_safety_completed)
     .bind(user.induction_completed)
     .bind(user.has_contract)

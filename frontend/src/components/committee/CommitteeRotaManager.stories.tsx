@@ -5,6 +5,7 @@ import {
   defaultHandlers,
   emptyUnallocatedHandlers,
   loadingHandlers,
+  cocResetHandlers,
 } from '@/test/handlers'
 
 const meta = {
@@ -32,6 +33,11 @@ export const Default: Story = {}
 
 export const EmptyList: Story = {
   parameters: { msw: { handlers: emptyUnallocatedHandlers } },
+}
+
+/** Just after a new Code of Conduct: members are hidden until they re-sign. */
+export const AfterCocReset: Story = {
+  parameters: { msw: { handlers: cocResetHandlers } },
 }
 
 export const LoadingState: Story = {

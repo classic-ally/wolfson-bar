@@ -11,3 +11,4 @@ pub mod term_weeks;
 pub mod magic_link;
 pub mod induction;
 pub mod kiosk;
+pub mod coc;

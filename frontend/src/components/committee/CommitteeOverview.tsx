@@ -63,6 +63,11 @@ export default function CommitteeOverview() {
             <p style={{ color: '#666', fontSize: '14px', margin: 0 }}>
               Fully onboarded rota members
             </p>
+            {stats.coc_resign_pending_count > 0 && (
+              <p style={{ color: '#b45309', fontSize: '14px', margin: '6px 0 0' }}>
+                {stats.coc_resign_pending_count} not counted until they re-sign the updated Code of Conduct
+              </p>
+            )}
           </div>
 
           {/* Unstaffed Shifts */}

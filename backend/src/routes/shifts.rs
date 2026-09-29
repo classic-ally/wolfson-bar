@@ -53,6 +53,10 @@ pub struct ShiftSignupUser {
     pub user_id: String,
     pub display_name: Option<String>,
     pub is_committee: bool,
+    /// Whether this member still has to re-sign the Code of Conduct before they
+    /// can check in. Only sent to committee viewers; `None` for everyone else.
+    #[ts(optional = nullable)]
+    pub needs_coc: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, TS)]
@@ -214,10 +218,11 @@ pub async fn get_shifts(
             user_id: String,
             display_name: Option<String>,
             is_committee: bool,
+            code_of_conduct_signed: bool,
         }
 
         let signups = sqlx::query_as::<_, SignupRow>(
-            "SELECT ss.user_id, u.display_name, u.is_committee
+            "SELECT ss.user_id, u.display_name, u.is_committee, u.code_of_conduct_signed
              FROM shift_signups ss
              JOIN users u ON ss.user_id = u.id
              WHERE ss.shift_date = ?"
@@ -282,6 +287,7 @@ pub async fn get_shifts(
                     user_id: s.user_id,
                     display_name: s.display_name,
                     is_committee: s.is_committee,
+                    needs_coc: user.is_committee.then_some(!s.code_of_conduct_signed),
                 })
                 .collect()
         };
@@ -716,7 +722,7 @@ pub async fn admin_remove_from_shift(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_util::{insert_user, test_state, user_with};
+    use crate::test_util::{insert_shift_signup, insert_user, test_state, user_with};
 
     #[tokio::test]
     async fn signup_blocked_when_food_safety_missing() {
@@ -781,5 +787,40 @@ mod tests {
             "expected supervised-shift error (proves first gate let user through), got: {}",
             body.error
         );
+    }
+
+    async fn signups_seen_by(state: &AppState, viewer: crate::models::User) -> Vec<ShiftSignupUser> {
+        let Json(shifts) = get_shifts(
+            State(state.clone()),
+            AuthenticatedUser(viewer),
+            Query(ShiftsQuery {
+                start_date: "2026-06-20".to_string(),
+                end_date: "2026-06-20".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        shifts.into_iter().next().unwrap().signups
+    }
+
+    // Should: flag booked members who still need to re-sign the CoC to committee viewers.
+    // Should not: reveal other members' CoC status to non-committee viewers.
+    #[tokio::test]
+    async fn needs_coc_is_shown_only_to_committee() {
+        let state = test_state().await;
+        let unsigned = user_with(true, false, true, true);
+        let mut committee = user_with(true, true, true, true);
+        committee.is_committee = true;
+        let member = user_with(true, true, true, true);
+        for u in [&unsigned, &committee, &member] {
+            insert_user(&state.db, u).await;
+        }
+        insert_shift_signup(&state.db, &unsigned.id, "2026-06-20").await;
+
+        let seen = signups_seen_by(&state, committee).await;
+        assert_eq!(seen[0].needs_coc, Some(true));
+
+        let seen = signups_seen_by(&state, member).await;
+        assert_eq!(seen[0].needs_coc, None);
     }
 }

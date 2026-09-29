@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { format } from 'date-fns'
 import {
+  getOverviewStats,
   getUnallocatedMembers,
   type UnallocatedMember,
 } from '@/lib/auth'
@@ -45,6 +46,15 @@ export default function CommitteeRotaManager() {
   }
 
   useEffect(reload, [range?.from?.getTime(), range?.to?.getTime()])
+
+  // Members who haven't re-signed the latest CoC aren't rota members, so the
+  // list silently omits them; say so rather than claim everyone is booked.
+  const [cocResignPending, setCocResignPending] = useState(0)
+  useEffect(() => {
+    getOverviewStats()
+      .then((s) => setCocResignPending(s.coc_resign_pending_count))
+      .catch(() => {})
+  }, [])
 
   const columns: ColumnDef<UnallocatedMember>[] = [
     {
@@ -99,6 +109,13 @@ export default function CommitteeRotaManager() {
         )}
       </div>
 
+      {cocResignPending > 0 && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 mb-4">
+          {cocResignPending} member{cocResignPending === 1 ? ' isn’t' : 's aren’t'} listed until they
+          re-sign the updated Code of Conduct.
+        </div>
+      )}
+
       {error && (
         <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive mb-4">
           {error}
@@ -113,7 +130,9 @@ export default function CommitteeRotaManager() {
         emptyMessage={
           !rangeReady
             ? 'Pick a date range to begin.'
-            : 'Everyone is already booked in this window.'
+            : cocResignPending > 0
+              ? 'No members who have signed the current Code of Conduct are unallocated in this window.'
+              : 'Everyone is already booked in this window.'
         }
         defaultSort={{ columnKey: 'lastShift', direction: 'asc' }}
         rowActions={(m) => (

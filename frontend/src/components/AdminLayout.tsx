@@ -13,6 +13,7 @@ export default function AdminLayout() {
   const tabs = [
     { path: '/admin', label: 'Users' },
     { path: '/admin/import', label: 'Import Users' },
+    { path: '/admin/coc', label: 'Code of Conduct' },
   ]
 
   return (
