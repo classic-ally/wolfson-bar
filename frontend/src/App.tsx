@@ -38,6 +38,7 @@ import CheckInPage from './components/CheckInPage'
 import CommitteeKiosk from './components/committee/CommitteeKiosk'
 import CommitteeKioskPair from './components/committee/CommitteeKioskPair'
 import BarStatusBadge from './components/BarStatusBadge'
+import ErrorBoundary from './components/ErrorBoundary'
 import { isLoggedIn, isCommittee, getEvents, getShifts, getUserStatus, getTermWeeks, TermWeek, getInductionDates } from './lib/auth'
 import type { Event } from './types/Event'
 import type { ShiftInfo } from './types/ShiftInfo'
@@ -381,13 +382,15 @@ function OnboardingStatusBarWrapper() {
   return <OnboardingStatusBar onNavigateToOnboarding={() => navigate('/profile')} />
 }
 
-function App() {
+function AppShell() {
+  const location = useLocation()
+
   return (
-    <BrowserRouter>
-      <div className="app">
-        <Header />
-        <OnboardingStatusBarWrapper />
-        <PasskeyNudgeBanner />
+    <div className="app">
+      <Header />
+      <OnboardingStatusBarWrapper />
+      <PasskeyNudgeBanner />
+      <ErrorBoundary resetKey={location.pathname}>
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/events" element={<EventsPage />} />
@@ -422,8 +425,16 @@ function App() {
             <Route path="coc" element={<AdminCodeOfConduct />} />
           </Route>
         </Routes>
-        <Footer />
-      </div>
+      </ErrorBoundary>
+      <Footer />
+    </div>
+  )
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <AppShell />
     </BrowserRouter>
   )
 }
