@@ -7,6 +7,7 @@ mod ical;
 mod models;
 mod notifications;
 mod routes;
+mod static_files;
 
 #[cfg(test)]
 mod test_util;
@@ -33,8 +34,8 @@ use routes::coc::{get_current_coc, publish_coc, list_coc_versions};
 use sqlx::sqlite::SqlitePoolOptions;
 use rand::Rng;
 use std::net::SocketAddr;
+use std::path::Path;
 use tower_http::cors::{Any, CorsLayer};
-use tower_http::services::{ServeDir, ServeFile};
 use webauthn_rs::prelude::*;
 
 #[tokio::main]
@@ -103,9 +104,6 @@ async fn main() {
 
     // Setup static file serving for frontend
     let frontend_path = std::env::var("FRONTEND_PATH").unwrap_or_else(|_| "../frontend/dist".to_string());
-    let index_path = format!("{}/index.html", frontend_path);
-    let serve_dir = ServeDir::new(&frontend_path)
-        .not_found_service(ServeFile::new(&index_path));
 
     // Build router
     let app = Router::new()
@@ -214,7 +212,7 @@ async fn main() {
             .layer(cors)
             .with_state(state)
             // Serve static files (must be last to act as catch-all)
-            .fallback_service(serve_dir);
+            .fallback_service(static_files::frontend(Path::new(&frontend_path)));
 
     // Start server
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
