@@ -59,8 +59,7 @@ export async function registerWithPasskey(displayName: string, email?: string): 
     })
 
     if (!startResponse.ok) {
-      const error = await startResponse.json()
-      throw new AuthError(error.error || 'Failed to start registration')
+      throw await responseError(startResponse, 'Failed to start registration')
     }
 
     const optionsResponse = await startResponse.json()
@@ -79,8 +78,7 @@ export async function registerWithPasskey(displayName: string, email?: string): 
     })
 
     if (!finishResponse.ok) {
-      const error = await finishResponse.json()
-      throw new AuthError(error.error || 'Failed to finish registration')
+      throw await responseError(finishResponse, 'Failed to finish registration')
     }
 
     const authResponse: AuthResponse = await finishResponse.json()
@@ -114,8 +112,7 @@ export async function loginWithPasskey(): Promise<AuthResponse> {
     })
 
     if (!startResponse.ok) {
-      const error = await startResponse.json()
-      throw new AuthError(error.error || 'Failed to start login')
+      throw await responseError(startResponse, 'Failed to start login')
     }
 
     const optionsResponse = await startResponse.json()
@@ -134,8 +131,7 @@ export async function loginWithPasskey(): Promise<AuthResponse> {
     })
 
     if (!finishResponse.ok) {
-      const error = await finishResponse.json()
-      throw new AuthError(error.error || 'Failed to finish login')
+      throw await responseError(finishResponse, 'Failed to finish login')
     }
 
     const authResponse: AuthResponse = await finishResponse.json()
@@ -1242,8 +1238,7 @@ export async function startPasskeySetup(): Promise<void> {
   })
 
   if (!startResponse.ok) {
-    const error = await startResponse.json()
-    throw new AuthError(error.error || 'Failed to start passkey setup')
+    throw await responseError(startResponse, 'Failed to start passkey setup')
   }
 
   const optionsResponse = await startResponse.json()
@@ -1261,8 +1256,7 @@ export async function startPasskeySetup(): Promise<void> {
   })
 
   if (!finishResponse.ok) {
-    const error = await finishResponse.json()
-    throw new AuthError(error.error || 'Failed to finish passkey setup')
+    throw await responseError(finishResponse, 'Failed to finish passkey setup')
   }
 }
 

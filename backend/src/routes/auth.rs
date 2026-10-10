@@ -1,4 +1,5 @@
 use axum::{
+    extract::rejection::JsonRejection,
     extract::State,
     http::StatusCode,
     Json,
@@ -118,6 +119,17 @@ pub struct FinishRequest<T> {
     pub credential: T,
 }
 
+/// Unwrap a finish body, answering in JSON when it does not parse. Tabs loaded before
+/// a deploy post the old shape and can only show the server's `error` field.
+fn finish_body<T>(
+    body: Result<Json<FinishRequest<T>>, JsonRejection>,
+) -> Result<FinishRequest<T>, (StatusCode, Json<ErrorResponse>)> {
+    body.map(|Json(req)| req).map_err(|e| {
+        info!("🔐 Unreadable passkey finish body: {}", e);
+        reject(StatusCode::BAD_REQUEST, "Couldn't read the passkey response. Please reload the page and try again.")
+    })
+}
+
 /// Store a ceremony's state under a fresh id, sweeping abandoned ones of the same type.
 async fn store_challenge(
     db: &SqlitePool,
@@ -198,8 +210,9 @@ pub async fn register_start(
 // Registration Finish - Verify and store credential
 pub async fn register_finish(
     State(state): State<AppState>,
-    Json(req): Json<FinishRequest<RegisterPublicKeyCredential>>,
+    body: Result<Json<FinishRequest<RegisterPublicKeyCredential>>, JsonRejection>,
 ) -> Result<Json<AuthResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let req = finish_body(body)?;
     let (reg_state, meta): (PasskeyRegistration, _) =
         take_challenge(&state.db, "registration", &req.state_id).await?;
     let meta: RegistrationMeta = serde_json::from_str(meta.as_deref().unwrap_or_default()).map_err(internal)?;
@@ -249,8 +262,9 @@ pub async fn login_start(
 // Authentication Finish - Verify signature
 pub async fn login_finish(
     State(state): State<AppState>,
-    Json(req): Json<FinishRequest<PublicKeyCredential>>,
+    body: Result<Json<FinishRequest<PublicKeyCredential>>, JsonRejection>,
 ) -> Result<Json<AuthResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let req = finish_body(body)?;
     let (auth_state, _): (DiscoverableAuthentication, _) =
         take_challenge(&state.db, "authentication", &req.state_id).await?;
 
@@ -623,5 +637,23 @@ mod passkey_tests {
 
         assert_eq!(register_finish_res(&state, &reg_start, &reg_cred).await.status(), StatusCode::BAD_REQUEST);
         assert_eq!(finish(&state, &login_start["state_id"], &login_cred).await.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // Impact: tabs loaded before a deploy keep the old frontend, which posts the bare
+    // credential and can only show the server's `error` field; a plain-text rejection
+    // surfaced as "Unexpected token 'F' ... is not valid JSON".
+    // Should: answer an old-shape finish body with a JSON error telling the member to reload.
+    #[tokio::test]
+    async fn stale_client_finish_gets_json_error() {
+        let state = test_state().await;
+        let mut device = register(&state, "Member").await;
+        let start = login_start_json(&state).await;
+        let credential = sign(&mut device, &start);
+
+        for uri in ["/api/auth/login/finish", "/api/auth/register/finish"] {
+            let res = post_json(&state, uri, serde_json::to_value(&credential).unwrap()).await;
+            assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+            assert!(body_json(res).await["error"].as_str().unwrap().contains("reload"));
+        }
     }
 }
