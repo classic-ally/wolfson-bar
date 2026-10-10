@@ -19,6 +19,10 @@ const MIGRATIONS: &[(&str, &str, &[&str])] = &[
 
 pub async fn run_migrations(db: &SqlitePool) {
     for (name, sql, ignorable_errors) in MIGRATIONS {
+        if already_applied(db, name).await {
+            tracing::info!("Migration {} already applied", name);
+            continue;
+        }
         match sqlx::query(sql).execute(db).await {
             Ok(_) => tracing::info!("Migration {} applied", name),
             Err(e) if ignorable_errors.iter().any(|ie| e.to_string().contains(ie)) => {
@@ -26,6 +30,23 @@ pub async fn run_migrations(db: &SqlitePool) {
             }
             Err(e) => panic!("Failed to run migration {}: {}", name, e),
         }
+    }
+}
+
+/// Detects migrations whose re-run is neither a cheap no-op nor an ignorable error.
+async fn already_applied(db: &SqlitePool, name: &str) -> bool {
+    match name {
+        // 009 recreates `users` from a fixed column list. Re-running it rewrites the
+        // whole table (minutes on production, site down meanwhile) and drops every
+        // column added after it, which later migrations then re-add with defaults.
+        "009_optional_passkey" => sqlx::query_scalar(
+            "SELECT \"notnull\" = 0 FROM pragma_table_info('users') WHERE name = 'passkey_credential'",
+        )
+        .fetch_optional(db)
+        .await
+        .expect("inspect users schema")
+        .unwrap_or(false),
+        _ => false,
     }
 }
 
@@ -178,5 +199,42 @@ mod backfill_tests {
             .await
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    // Impact: 009 rebuilt `users` on every startup, taking the site down for minutes
+    // and resetting columns added after it (supervised shifts, CoC version and date).
+    // Should: keep members' data and the existing users table intact when migrations run again.
+    #[tokio::test]
+    async fn rerunning_migrations_preserves_users() {
+        let url = "sqlite:file:rerun_009_test?mode=memory&cache=shared";
+        let db = SqlitePoolOptions::new().max_connections(5).connect(url).await.unwrap();
+        super::run_migrations(&db).await;
+        sqlx::query(
+            "INSERT INTO users (id, is_committee, code_of_conduct_signed, code_of_conduct_version,
+             code_of_conduct_signed_at, food_safety_completed, induction_completed,
+             supervised_shift_completed, has_contract, created_at)
+             VALUES ('member', 0, 1, 2, '2026-10-08T12:00:00Z', 0, 1, 0, 0, '')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        // Recreating the table would drop this index along with it.
+        sqlx::query("CREATE INDEX rerun_marker ON users(email)").execute(&db).await.unwrap();
+
+        super::run_migrations(&db).await;
+
+        let row: (Option<i64>, Option<String>, bool) = sqlx::query_as(
+            "SELECT code_of_conduct_version, code_of_conduct_signed_at, supervised_shift_completed
+             FROM users WHERE id = 'member'",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(row, (Some(2), Some("2026-10-08T12:00:00Z".to_string()), false));
+        let marker: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE name = 'rerun_marker'")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+        assert_eq!(marker, 1);
     }
 }
