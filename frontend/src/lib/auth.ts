@@ -68,14 +68,14 @@ export async function registerWithPasskey(displayName: string, email?: string): 
     // 2. Create credential with browser/authenticator
     // SimpleWebAuthn v13+ expects { optionsJSON: publicKey }
     const credential = await startRegistration({
-      optionsJSON: optionsResponse.publicKey || optionsResponse
+      optionsJSON: optionsResponse.publicKey
     })
 
-    // 3. Finish registration - send public key to backend
+    // 3. Finish registration - send public key to backend with the challenge it answers
     const finishResponse = await fetch(`${API_BASE}/api/auth/register/finish`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(credential),
+      body: JSON.stringify({ state_id: optionsResponse.state_id, credential }),
     })
 
     if (!finishResponse.ok) {
@@ -123,14 +123,14 @@ export async function loginWithPasskey(): Promise<AuthResponse> {
     // 2. Sign challenge with authenticator
     // SimpleWebAuthn v13+ expects { optionsJSON: publicKey }
     const credential = await startAuthentication({
-      optionsJSON: optionsResponse.publicKey || optionsResponse
+      optionsJSON: optionsResponse.publicKey
     })
 
-    // 3. Finish login - verify signature
+    // 3. Finish login - verify signature against the challenge this login was issued
     const finishResponse = await fetch(`${API_BASE}/api/auth/login/finish`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(credential),
+      body: JSON.stringify({ state_id: optionsResponse.state_id, credential }),
     })
 
     if (!finishResponse.ok) {
