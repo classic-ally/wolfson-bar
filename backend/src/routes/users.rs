@@ -10,7 +10,7 @@ use ts_rs::TS;
 use jsonwebtoken::{encode, EncodingKey, Header};
 
 use crate::auth::{AuthenticatedUser, Claims};
-use crate::models::ErrorResponse;
+use crate::models::{ErrorResponse, IS_ROTA_MEMBER_SQL};
 use crate::routes::coc::{current_coc_version, record_signature};
 use crate::routes::auth::AppState;
 
@@ -443,6 +443,57 @@ pub async fn get_my_overview(
         shifts_next_7_days,
         contract_expiry_date: user.contract_expiry_date,
     }))
+}
+
+/// One entry in the member-facing roster. Deliberately name-only: contracts,
+/// onboarding status, and committee flags stay behind the committee endpoints.
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RotaMember {
+    pub display_name: String,
+}
+
+/// List active rota members by display name, so members arranging cover for a
+/// shift can check the person they hand it to is on the rota.
+pub async fn get_rota_members(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+) -> Result<Json<Vec<RotaMember>>, (StatusCode, Json<ErrorResponse>)> {
+    if !(user.is_rota_member() || user.is_committee || user.is_admin) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "Only active rota members can view the member list".to_string(),
+            }),
+        ));
+    }
+
+    info!("👥 User {} fetching rota member list", user.id);
+
+    let names = sqlx::query_scalar::<_, String>(&format!(
+        "SELECT display_name FROM users
+         WHERE {IS_ROTA_MEMBER_SQL}
+         AND display_name IS NOT NULL AND TRIM(display_name) != ''
+         ORDER BY display_name COLLATE NOCASE ASC"
+    ))
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        error!("❌ Failed to fetch rota members: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "Failed to fetch rota members".to_string(),
+            }),
+        )
+    })?;
+
+    Ok(Json(
+        names
+            .into_iter()
+            .map(|display_name| RotaMember { display_name })
+            .collect(),
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1122,5 +1173,103 @@ mod tests {
         assert_eq!(o.next_onboarding_step.as_deref(), Some("code_of_conduct_resign"));
         let Json(o) = get_my_overview(State(state), AuthenticatedUser(never)).await.unwrap();
         assert_eq!(o.next_onboarding_step.as_deref(), Some("code_of_conduct"));
+    }
+}
+
+#[cfg(test)]
+mod rota_members_tests {
+    use super::*;
+    use crate::models::User;
+    use crate::test_util::{body_json, get_req, insert_user, test_state, token_for, user_with, user_with_role};
+    use axum::http::StatusCode as Status;
+    use axum::routing::get;
+    use axum::Router;
+    use tower::ServiceExt;
+
+    fn build_app(state: AppState) -> Router {
+        Router::new()
+            .route("/api/members", get(get_rota_members))
+            .with_state(state)
+    }
+
+    fn named(mut u: User, id: &str, name: &str) -> User {
+        u.id = id.to_string();
+        u.display_name = Some(name.to_string());
+        u
+    }
+
+    async fn fetch_as(state: &AppState, user: &User) -> axum::response::Response {
+        let token = token_for(state, user);
+        build_app(state.clone())
+            .oneshot(get_req("/api/members", Some(&token), None))
+            .await
+            .unwrap()
+    }
+
+    // Should: list every fully onboarded rota member by name, alphabetically.
+    // Should not: list members who are still onboarding.
+    #[tokio::test]
+    async fn lists_only_active_rota_members_sorted_by_name() {
+        let state = test_state().await;
+        let viewer = named(user_with(true, true, true, true), "viewer", "Mira");
+        insert_user(&state.db, &viewer).await;
+        insert_user(&state.db, &named(user_with(true, true, true, true), "b", "bea")).await;
+        insert_user(&state.db, &named(user_with(true, true, true, false), "c", "Carl")).await;
+        insert_user(&state.db, &named(user_with(false, false, false, false), "d", "Dana")).await;
+
+        let res = fetch_as(&state, &viewer).await;
+        assert_eq!(res.status(), Status::OK);
+        let body = body_json(res).await;
+        assert_eq!(
+            body,
+            serde_json::json!([{ "display_name": "bea" }, { "display_name": "Mira" }])
+        );
+    }
+
+    // Impact: rota members see each other here, but onboarding status, contracts,
+    // and committee flags are promised to committee only in the privacy notice.
+    // Should not: expose anything about a member beyond their display name.
+    #[tokio::test]
+    async fn exposes_display_name_only() {
+        let state = test_state().await;
+        let mut member = named(user_with(true, true, true, true), "m", "Mira");
+        member.is_committee = true;
+        member.has_contract = true;
+        insert_user(&state.db, &member).await;
+
+        let body = body_json(fetch_as(&state, &member).await).await;
+        let entry = body[0].as_object().unwrap();
+        assert_eq!(entry.keys().collect::<Vec<_>>(), vec!["display_name"]);
+    }
+
+    // Should: refuse the list to users who haven't finished onboarding.
+    #[tokio::test]
+    async fn rejects_onboarding_user_with_403() {
+        let state = test_state().await;
+        let user = user_with(true, true, true, false);
+        insert_user(&state.db, &user).await;
+
+        assert_eq!(fetch_as(&state, &user).await.status(), Status::FORBIDDEN);
+    }
+
+    // Should: let committee members view the list even if their own onboarding is incomplete.
+    #[tokio::test]
+    async fn allows_committee_member_who_is_not_on_rota() {
+        let state = test_state().await;
+        let user = user_with_role(true, false);
+        insert_user(&state.db, &user).await;
+
+        assert_eq!(fetch_as(&state, &user).await.status(), Status::OK);
+    }
+
+    // Should: require sign-in.
+    #[tokio::test]
+    async fn rejects_unauthenticated_request_with_401() {
+        let state = test_state().await;
+        let res = build_app(state)
+            .oneshot(get_req("/api/members", None, None))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), Status::UNAUTHORIZED);
     }
 }

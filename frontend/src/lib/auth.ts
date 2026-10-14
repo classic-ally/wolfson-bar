@@ -3,6 +3,7 @@ import type { AuthResponse } from '../types/AuthResponse'
 import type { UserStatus } from '../types/UserStatus'
 import type { PendingCertificate } from '../types/PendingCertificate'
 import type { ActiveMember } from '../types/ActiveMember'
+import type { RotaMember } from '../types/RotaMember'
 import type { VerificationToken } from '../types/VerificationToken'
 import type { PendingContract } from '../types/PendingContract'
 import type { Event } from '../types/Event'
@@ -447,6 +448,20 @@ export async function getActiveMembers(): Promise<ActiveMember[]> {
   if (!response.ok) {
     const error = await response.json()
     throw new AuthError(error.error || 'Failed to get active members')
+  }
+
+  return response.json()
+}
+
+/**
+ * Display names of all active rota members. Open to rota members and committee.
+ */
+export async function getRotaMembers(): Promise<RotaMember[]> {
+  const response = await authenticatedFetch(`${API_BASE}/api/members`)
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to get rota members')
   }
 
   return response.json()

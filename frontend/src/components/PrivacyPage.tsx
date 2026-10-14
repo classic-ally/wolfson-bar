@@ -31,6 +31,7 @@ export default function PrivacyPage() {
         <h2>Who can access your data</h2>
         <ul>
           <li><strong>You</strong> can view and export all your data from your profile</li>
+          <li><strong>Other active rota members</strong> can see your display name once you have completed onboarding, so they can check who is on the rota when arranging cover</li>
           <li><strong>Committee members</strong> can see your display name, shift signups, and onboarding status</li>
           <li><strong>Admins</strong> can additionally manage user roles</li>
           <li>Your email address is only visible to you</li>

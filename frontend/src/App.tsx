@@ -23,6 +23,7 @@ import UserOverview from './components/user/UserOverview'
 import UserShifts from './components/user/UserShifts'
 import UserProfile from './components/user/UserProfile'
 import UserInduction from './components/user/UserInduction'
+import UserMembers from './components/user/UserMembers'
 import AboutPage from './components/AboutPage'
 import MenuPage from './components/MenuPage'
 import ShiftSlotCalendar from './components/committee/ShiftSlotCalendar'
@@ -405,6 +406,7 @@ function AppShell() {
             <Route path="shifts" element={<UserShifts />} />
             <Route path="account" element={<UserProfile />} />
             <Route path="induction" element={<UserInduction />} />
+            <Route path="members" element={<UserMembers />} />
           </Route>
           <Route path="/committee" element={<CommitteeLayout />}>
             <Route index element={<CommitteeOverview />} />
