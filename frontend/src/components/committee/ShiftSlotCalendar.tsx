@@ -15,9 +15,10 @@ const DUAL_MONTH_THRESHOLD_PX = 1100
 /** Who is looking at the calendar. Drives state-dependent visual rules
  *  (e.g. grey out shifts a pre-induction user can't actually sign up for).
  *
- *  - `self`: browsing one's own opportunities. Pre-induction users see a grey
- *    fill on dates with no committee member on shift, since they can't book
- *    without supervision.
+ *  - `self`: browsing one's own opportunities. Users who haven't completed
+ *    induction or their supervised shift see a grey fill on dates with no
+ *    committee member on shift, since they can't book without supervision.
+ *    Inducted users also get an "S" badge on dates they can book.
  *  - `manager`: the viewer is allocating someone else (rota manager). The
  *    grey rule is skipped — what matters is current fill state, not whether
  *    the viewer specifically can book. */

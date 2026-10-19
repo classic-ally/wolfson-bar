@@ -258,7 +258,11 @@ export default function ShiftDetailModal({ shift, event, userStatus, isCommittee
           )}
           {!needsInduction && !isSupervisedComplete && (
             <div style={{ color: '#004085', backgroundColor: '#cce5ff', padding: '8px', borderRadius: '4px', marginTop: '8px' }}>
-              ℹ️ You need to complete a supervised shift with a committee member present.
+              {!hasCommitteeMember
+                ? 'ℹ️ You need to complete a supervised shift with a committee member present. Look for dates with a green S on the calendar.'
+                : isSignedUp
+                  ? 'ℹ️ A committee member is on this shift with you. Ask them to mark your supervised shift complete afterwards.'
+                  : 'ℹ️ A committee member is on this shift, so it counts as your supervised shift.'}
             </div>
           )}
         </div>
@@ -274,6 +278,14 @@ export default function ShiftDetailModal({ shift, event, userStatus, isCommittee
                     {signup.display_name || 'Unknown'}
                     {signup.user_id === currentUserId && (
                       <span style={{ color: '#8B0000', marginLeft: '5px' }}>(You)</span>
+                    )}
+                    {signup.is_committee && (
+                      <Badge
+                        variant="outline"
+                        className="ml-2 border-emerald-300 bg-emerald-50 text-emerald-800"
+                      >
+                        Committee
+                      </Badge>
                     )}
                     {signup.needs_coc && (
                       <Badge

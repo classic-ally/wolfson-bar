@@ -9,6 +9,23 @@ import type { ViewerContext } from './ShiftSlotCalendar'
 
 export type FillState = 'empty' | 'partial' | 'full' | 'blocked' | 'unknown'
 
+/** Whether the viewer can only book shifts a committee member is already on:
+ *  anyone who hasn't been inducted or completed their supervised shift yet. */
+function needsSupervision(viewer: ViewerContext): boolean {
+  return (
+    viewer.kind === 'self' &&
+    !!viewer.userStatus &&
+    (!viewer.userStatus.induction_completed || !viewer.userStatus.supervised_shift_completed)
+  )
+}
+
+function isViewerOn(shift: ShiftInfo, viewer: ViewerContext): boolean {
+  return (
+    viewer.kind === 'self' &&
+    shift.signups.some((s) => s.user_id === viewer.userStatus?.user_id)
+  )
+}
+
 export function fillStateFor(
   shift: ShiftInfo | undefined,
   viewer: ViewerContext,
@@ -20,16 +37,30 @@ export function fillStateFor(
   // isn't a recruitment problem, just history.
   if (isPast) return 'unknown'
   if (
-    viewer.kind === 'self' &&
-    viewer.userStatus &&
-    !viewer.userStatus.induction_completed &&
-    !shift.signups.some((s) => s.is_committee)
+    needsSupervision(viewer) &&
+    !shift.signups.some((s) => s.is_committee) &&
+    !isViewerOn(shift, viewer)
   ) {
     return 'blocked'
   }
   if (shift.signups_count >= shift.max_volunteers) return 'full'
   if (shift.signups_count > 0) return 'partial'
   return 'empty'
+}
+
+/** Whether to badge a date as bookable for a supervised shift: the viewer is
+ *  inducted but unsupervised, and a committee member is on a shift with room
+ *  that the viewer's contract status lets them join. */
+export function offersSupervisedShift(
+  shift: ShiftInfo | undefined,
+  viewer: ViewerContext,
+  isPast: boolean,
+): boolean {
+  if (viewer.kind !== 'self' || !viewer.userStatus?.induction_completed) return false
+  if (!shift || !needsSupervision(viewer) || isViewerOn(shift, viewer)) return false
+  if (shift.requires_contract && !viewer.userStatus.has_contract) return false
+  const state = fillStateFor(shift, viewer, isPast)
+  return (state === 'empty' || state === 'partial') && shift.signups.some((s) => s.is_committee)
 }
 
 const fillStyles: Record<FillState, string> = {
@@ -121,6 +152,8 @@ export default function ShiftCalendarDay({
   const isBlocked = state === 'blocked'
   const disabled = modifiers.disabled || isFull || isBlocked
   const isPublic = viewerContext.kind === 'public'
+  const showSupervised = offersSupervisedShift(shift, viewerContext, isPast)
+  const supervisedTitle = 'Committee member on shift: book this as your supervised shift'
 
   const isOwnInduction = !!shift?.current_user_induction_available
   const showInduction =
@@ -173,6 +206,15 @@ export default function ShiftCalendarDay({
               aria-label="Paid event"
             >
               £
+            </span>
+          )}
+          {showSupervised && (
+            <span
+              className="rounded bg-emerald-600 px-1 text-[9px] font-bold leading-[14px] text-white"
+              title={supervisedTitle}
+              aria-label={supervisedTitle}
+            >
+              S
             </span>
           )}
           {showInduction && (

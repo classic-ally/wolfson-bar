@@ -190,6 +190,47 @@ export const UserBooked: Story = {
   },
 }
 
+const unsupervisedViewer = {
+  kind: 'self' as const,
+  userStatus: {
+    user_id: 'u-current',
+    display_name: 'New Member',
+    is_committee: false,
+    code_of_conduct_signed: true,
+    code_of_conduct_version: 1,
+    food_safety_completed: true,
+    has_food_safety_certificate: true,
+    induction_completed: true,
+    has_contract: false,
+    contract_expiry_date: null,
+    email: null,
+    email_notifications_enabled: false,
+    privacy_consent_given: true,
+    has_passkey: true,
+    supervised_shift_completed: false,
+  },
+}
+
+export const SupervisedShiftAvailable: Story = {
+  args: {
+    shift: shift({
+      signups_count: 1,
+      signups: [{ user_id: 'u-committee', display_name: 'Committee', is_committee: true }],
+    }),
+    viewerContext: unsupervisedViewer,
+  },
+}
+
+export const NoSupervisorYet: Story = {
+  args: {
+    shift: shift({
+      signups_count: 1,
+      signups: [{ user_id: 'u-other', display_name: 'Volunteer', is_committee: false }],
+    }),
+    viewerContext: unsupervisedViewer,
+  },
+}
+
 export const PublicView: Story = {
   args: {
     shift: shift({ signups_count: 0, requires_contract: true }),

@@ -184,7 +184,9 @@ function CalendarLegendPopup({ userStatus }: { userStatus: UserStatus }) {
             </p>
             {!userStatus.supervised_shift_completed && (
               <p className="text-xs text-muted-foreground">
-                Your first shift must be supervised by a committee member.
+                Your first shift must be supervised by a committee member. Dates
+                with a green <strong>S</strong> already have one signed up; grey
+                dates don't yet.
               </p>
             )}
           </>

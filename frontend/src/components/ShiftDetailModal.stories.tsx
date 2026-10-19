@@ -205,6 +205,27 @@ export const NeedsSupervisedShift: Story = {
   },
 }
 
+export const SupervisedShiftAvailable: Story = {
+  render: () => (
+    <Wrapper
+      shift={makeShift({
+        signups_count: 2,
+        signups: [
+          { user_id: 'u-allison', display_name: 'Allison Bentley', is_committee: false },
+          { user_id: 'u-committee', display_name: 'Committee Member', is_committee: true },
+        ],
+      })}
+      userStatus={makeUser({ supervised_shift_completed: false })}
+    />
+  ),
+  args: {
+    shift: makeShift(),
+    userStatus: makeUser(),
+    onClose: () => {},
+    onUpdate: () => {},
+  },
+}
+
 // Regression guard for the Base-UI-Combobox-inside-Radix-modal bug:
 // the popup is portaled into the dialog and must remain interactive.
 // Before the fix, clicking an option did nothing (popup landed in the
