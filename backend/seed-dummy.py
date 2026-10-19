@@ -53,6 +53,7 @@ USERS = [
     ("noor",    "Noor Newbie",      "noor@example.test",     "pre_induction", "pre_induction"),
     ("luca",    "Luca Newbie",      "luca@example.test",     "pre_induction", "pre_induction"),
     ("eve",     "Eve Halfway",      "eve@example.test",      "member",        "pending_cert"),
+    ("theo",    "Theo Trainee",     "theo@example.test",     "member",        "needs_supervised"),
 ]
 
 # -- Events ------------------------------------------------------------------
@@ -153,7 +154,7 @@ def seed_users(con: sqlite3.Connection) -> list[dict]:
         coc = onboarding != "pre_induction"
         food = onboarding not in ("pre_induction", "pending_cert")
         induction = onboarding not in ("pre_induction",)
-        supervised = induction
+        supervised = induction and onboarding != "needs_supervised"
         has_contract = onboarding == "full"
         contract_expiry = "2026-10-31" if has_contract else None
 
@@ -179,7 +180,8 @@ def seed_users(con: sqlite3.Connection) -> list[dict]:
             "id": uid, "name": name, "email": email,
             "role": role, "onboarding": onboarding,
             "is_committee": is_committee, "is_admin": is_admin,
-            "induction": induction, "has_contract": has_contract,
+            "induction": induction, "supervised": supervised,
+            "has_contract": has_contract,
         })
     con.commit()
     return members
@@ -218,8 +220,10 @@ def seed_shift_signups(
     """Distribute shift signups across the next 8 weeks for the full UI mix."""
     cur = con.cursor()
     today = date.today()
-    bookable = [m for m in members if m["induction"]]
-    contracted = [m for m in members if m["has_contract"] and m["induction"]]
+    # Unsupervised members can only join shifts a committee member is on, so
+    # leave them off the random fill.
+    bookable = [m for m in members if m["supervised"]]
+    contracted = [m for m in members if m["has_contract"] and m["supervised"]]
 
     by_date = {e["date"]: e for e in events}
 
