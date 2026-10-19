@@ -15,6 +15,7 @@ const MIGRATIONS: &[(&str, &str, &[&str])] = &[
     ("012_kiosk", include_str!("../migrations/012_kiosk.sql"), &["duplicate column", "already exists"]),
     ("013_kiosk_pairing_meta", include_str!("../migrations/013_kiosk_pairing_meta.sql"), &["duplicate column"]),
     ("014_coc_versions", include_str!("../migrations/014_coc_versions.sql"), &["duplicate column"]),
+    ("015_email_categories", include_str!("../migrations/015_email_categories.sql"), &["duplicate column"]),
 ];
 
 pub async fn run_migrations(db: &SqlitePool) {
@@ -236,5 +237,48 @@ mod backfill_tests {
             .await
             .unwrap();
         assert_eq!(marker, 1);
+    }
+
+    // Impact: members who turned emails off before the categories split must
+    // not start receiving onboarding emails they never agreed to.
+    // Should: carry each member's existing email choice into both categories.
+    // Should: turn both categories on for members who join after the split.
+    #[tokio::test]
+    async fn email_categories_inherit_existing_choice() {
+        let url = "sqlite:file:email_categories_015_test?mode=memory&cache=shared";
+        let db = SqlitePoolOptions::new().max_connections(5).connect(url).await.unwrap();
+        // Bring the schema up to just before 015, ignoring the same re-run
+        // errors the real runner tolerates.
+        for (_, sql, _) in super::MIGRATIONS.iter().take_while(|(name, ..)| *name != "015_email_categories") {
+            let _ = sqlx::query(sql).execute(&db).await;
+        }
+        sqlx::query(
+            "INSERT INTO users (id, created_at, email_notifications_enabled)
+             VALUES ('opted-out', '', 0), ('opted-in', '', 1)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+
+        super::run_migrations(&db).await;
+        sqlx::query("INSERT INTO users (id, created_at) VALUES ('newcomer', '')")
+            .execute(&db)
+            .await
+            .unwrap();
+
+        let rows: Vec<(String, bool, bool)> = sqlx::query_as(
+            "SELECT id, email_notifications_enabled, email_membership FROM users ORDER BY id",
+        )
+        .fetch_all(&db)
+        .await
+        .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                ("newcomer".to_string(), true, true),
+                ("opted-in".to_string(), true, true),
+                ("opted-out".to_string(), false, false),
+            ]
+        );
     }
 }

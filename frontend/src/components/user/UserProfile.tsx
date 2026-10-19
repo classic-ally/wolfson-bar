@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getUserStatus, updateDisplayName, submitContractRequest, updateEmail, updateEmailNotifications, exportMyData, deleteMyAccount, logout } from '../../lib/auth'
+import { getUserStatus, updateDisplayName, submitContractRequest, updateEmail, updateEmailPreferences, exportMyData, deleteMyAccount, logout } from '../../lib/auth'
 import type { UserStatus } from '../../types/UserStatus'
 import { usePageTitle } from '../../hooks/usePageTitle'
 
@@ -71,10 +71,11 @@ export default function UserProfile() {
     setEditingEmail(true)
   }
 
-  const handleToggleNotifications = async () => {
+  const handleTogglePreference = async (category: 'shift_updates' | 'membership') => {
     if (!status) return
+    const current = category === 'shift_updates' ? status.email_shift_updates : status.email_membership
     try {
-      await updateEmailNotifications(!status.email_notifications_enabled)
+      await updateEmailPreferences({ [category]: !current })
       loadStatus()
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to update notification settings')
@@ -317,24 +318,44 @@ export default function UserProfile() {
               </div>
             )}
             <span style={{ fontSize: '12px', color: '#888' }}>
-              Used for magic link sign-in and shift notifications.
+              Used for magic link sign-in and the emails you choose below.
             </span>
           </div>
 
-          {/* Email Notifications Toggle */}
+          {/* Email category toggles */}
           {status.email && (
-            <div style={{ marginTop: '10px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={status.email_notifications_enabled}
-                  onChange={handleToggleNotifications}
-                  style={{ width: '18px', height: '18px' }}
-                />
-                <span style={{ fontSize: '14px' }}>
-                  Receive email notifications for shift changes
-                </span>
-              </label>
+            <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {([
+                {
+                  category: 'shift_updates',
+                  checked: status.email_shift_updates,
+                  label: 'Shift updates',
+                  description: "When you're added to or removed from a shift or induction, with a calendar invite.",
+                },
+                {
+                  category: 'membership',
+                  checked: status.email_membership,
+                  label: 'Membership',
+                  description: 'Your next steps as you get set up, and anything that needs your attention, like a new Code of Conduct to sign.',
+                },
+              ] as const).map(({ category, checked, label, description }) => (
+                <label key={category} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => handleTogglePreference(category)}
+                    style={{ width: '18px', height: '18px', marginTop: '2px' }}
+                  />
+                  <span style={{ fontSize: '14px' }}>
+                    <strong>{label}</strong>
+                    <br />
+                    <span style={{ color: '#666' }}>{description}</span>
+                  </span>
+                </label>
+              ))}
+              <span style={{ fontSize: '12px', color: '#888' }}>
+                Sign-in links are always sent.
+              </span>
             </div>
           )}
         </div>

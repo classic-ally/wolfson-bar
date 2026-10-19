@@ -168,10 +168,10 @@ def seed_users(con: sqlite3.Connection) -> list[dict]:
                 food_safety_certificate, food_safety_certificate_type,
                 induction_completed, has_contract, contract_expiry_date,
                 created_at, email, email_notifications_enabled,
-                privacy_consent_given, supervised_shift_completed
+                email_membership, privacy_consent_given, supervised_shift_completed
             ) VALUES (?, ?, NULL, ?, ?, ?,
                       (SELECT MAX(version) FROM coc_versions) * ?,
-                      ?, NULL, NULL, ?, ?, ?, ?, ?, 0, 1, ?)
+                      ?, NULL, NULL, ?, ?, ?, ?, ?, 0, 0, 1, ?)
             """,
             (uid, name, is_committee, is_admin, coc, 1 if coc else None, food,
              induction, has_contract, contract_expiry, now, email, supervised),

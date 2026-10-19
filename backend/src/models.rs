@@ -55,8 +55,13 @@ pub struct User {
     pub created_at: String,
     #[sqlx(default)]
     pub email: Option<String>,
+    /// Shift and induction schedule emails. Stored in the original
+    /// `email_notifications_enabled` column (see migration 015).
+    #[sqlx(default, rename = "email_notifications_enabled")]
+    pub email_shift_updates: bool,
+    /// Onboarding and Code of Conduct emails.
     #[sqlx(default)]
-    pub email_notifications_enabled: bool,
+    pub email_membership: bool,
     #[sqlx(default)]
     pub privacy_consent_given: bool,
     #[sqlx(default)]
@@ -103,7 +108,8 @@ impl User {
             contract_expiry_date: None,
             created_at: chrono::Utc::now().to_rfc3339(),
             email: None,
-            email_notifications_enabled: false,
+            email_shift_updates: false,
+            email_membership: false,
             privacy_consent_given: false,
             supervised_shift_completed: false,
         }

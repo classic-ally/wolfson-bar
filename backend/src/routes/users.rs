@@ -30,7 +30,10 @@ pub struct UserStatus {
     pub has_contract: bool,
     pub contract_expiry_date: Option<String>,
     pub email: Option<String>,
-    pub email_notifications_enabled: bool,
+    /// Emails about shifts and inductions the user is booked on.
+    pub email_shift_updates: bool,
+    /// Onboarding next steps and Code of Conduct re-sign emails.
+    pub email_membership: bool,
     pub privacy_consent_given: bool,
     pub has_passkey: bool,
     pub supervised_shift_completed: bool,
@@ -75,7 +78,8 @@ pub async fn get_me(
         has_contract: user.has_contract,
         contract_expiry_date: user.contract_expiry_date,
         email: user.email,
-        email_notifications_enabled: user.email_notifications_enabled,
+        email_shift_updates: user.email_shift_updates,
+        email_membership: user.email_membership,
         privacy_consent_given: user.privacy_consent_given,
         has_passkey: user.passkey_credential.is_some(),
         supervised_shift_completed: user.supervised_shift_completed,
@@ -512,7 +516,7 @@ pub async fn update_email(
         let trimmed = email.trim();
         if trimmed.is_empty() {
             // Clear email
-            sqlx::query("UPDATE users SET email = NULL, email_notifications_enabled = FALSE WHERE id = ?")
+            sqlx::query("UPDATE users SET email = NULL, email_notifications_enabled = FALSE, email_membership = FALSE WHERE id = ?")
                 .bind(&user.id)
                 .execute(&state.db)
                 .await
@@ -569,7 +573,7 @@ pub async fn update_email(
             })?;
     } else {
         // Clear email and disable notifications
-        sqlx::query("UPDATE users SET email = NULL, email_notifications_enabled = FALSE WHERE id = ?")
+        sqlx::query("UPDATE users SET email = NULL, email_notifications_enabled = FALSE, email_membership = FALSE WHERE id = ?")
             .bind(&user.id)
             .execute(&state.db)
             .await
@@ -582,26 +586,34 @@ pub async fn update_email(
     Ok(StatusCode::OK)
 }
 
-#[derive(Debug, Deserialize)]
-pub struct UpdateEmailNotificationsRequest {
-    pub enabled: bool,
+/// Partial update: omitted categories keep their current setting.
+#[derive(Debug, Deserialize, TS)]
+#[ts(export)]
+pub struct UpdateEmailPreferencesRequest {
+    #[ts(optional)]
+    pub shift_updates: Option<bool>,
+    #[ts(optional)]
+    pub membership: Option<bool>,
 }
 
-/// Toggle email notifications
-pub async fn update_email_notifications(
+/// Turn each email category on or off
+pub async fn update_email_preferences(
     State(state): State<AppState>,
     AuthenticatedUser(user): AuthenticatedUser,
-    Json(req): Json<UpdateEmailNotificationsRequest>,
+    Json(req): Json<UpdateEmailPreferencesRequest>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    if req.enabled && user.email.is_none() {
+    let shift_updates = req.shift_updates.unwrap_or(user.email_shift_updates);
+    let membership = req.membership.unwrap_or(user.email_membership);
+    if (shift_updates || membership) && user.email.is_none() {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse { error: "Cannot enable notifications without an email address".to_string() }),
         ));
     }
 
-    sqlx::query("UPDATE users SET email_notifications_enabled = ? WHERE id = ?")
-        .bind(req.enabled)
+    sqlx::query("UPDATE users SET email_notifications_enabled = ?, email_membership = ? WHERE id = ?")
+        .bind(shift_updates)
+        .bind(membership)
         .bind(&user.id)
         .execute(&state.db)
         .await
@@ -703,7 +715,8 @@ pub async fn export_my_data(
             "user_id": user.id,
             "display_name": user.display_name,
             "email": user.email,
-            "email_notifications_enabled": user.email_notifications_enabled,
+            "email_shift_updates": user.email_shift_updates,
+            "email_membership": user.email_membership,
             "is_committee": user.is_committee,
             "is_admin": user.is_admin,
             "code_of_conduct_signed": user.code_of_conduct_signed,
@@ -1173,6 +1186,51 @@ mod tests {
         assert_eq!(o.next_onboarding_step.as_deref(), Some("code_of_conduct_resign"));
         let Json(o) = get_my_overview(State(state), AuthenticatedUser(never)).await.unwrap();
         assert_eq!(o.next_onboarding_step.as_deref(), Some("code_of_conduct"));
+    }
+
+    async fn email_prefs(state: &AppState, id: &str) -> (bool, bool) {
+        sqlx::query_as("SELECT email_notifications_enabled, email_membership FROM users WHERE id = ?")
+            .bind(id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap()
+    }
+
+    // Should: change only the email category named in the request.
+    #[tokio::test]
+    async fn email_preferences_update_one_category() {
+        let state = test_state().await;
+        let mut user = user_with(true, true, true, true);
+        user.email = Some("member@example.test".into());
+        user.email_shift_updates = true;
+        user.email_membership = true;
+        insert_user(&state.db, &user).await;
+        sqlx::query("UPDATE users SET email = ? WHERE id = ?")
+            .bind(&user.email)
+            .bind(&user.id)
+            .execute(&state.db)
+            .await
+            .unwrap();
+
+        let req = UpdateEmailPreferencesRequest { shift_updates: None, membership: Some(false) };
+        update_email_preferences(State(state.clone()), AuthenticatedUser(user.clone()), Json(req))
+            .await
+            .unwrap();
+        assert_eq!(email_prefs(&state, &user.id).await, (true, false));
+    }
+
+    // Should not: turn on either email category for a member with no email address.
+    #[tokio::test]
+    async fn email_preferences_require_an_address() {
+        let state = test_state().await;
+        let user = user_with(true, true, true, true);
+        insert_user(&state.db, &user).await;
+
+        let req = UpdateEmailPreferencesRequest { shift_updates: None, membership: Some(true) };
+        let (status, _) = update_email_preferences(State(state), AuthenticatedUser(user), Json(req))
+            .await
+            .expect_err("expected missing-email rejection");
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 }
 

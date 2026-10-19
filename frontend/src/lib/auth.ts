@@ -1,6 +1,7 @@
 import { startRegistration, startAuthentication } from '@simplewebauthn/browser'
 import type { AuthResponse } from '../types/AuthResponse'
 import type { UserStatus } from '../types/UserStatus'
+import type { UpdateEmailPreferencesRequest } from '../types/UpdateEmailPreferencesRequest'
 import type { PendingCertificate } from '../types/PendingCertificate'
 import type { ActiveMember } from '../types/ActiveMember'
 import type { RotaMember } from '../types/RotaMember'
@@ -774,13 +775,13 @@ export async function updateEmail(email: string | null): Promise<void> {
 }
 
 /**
- * Toggle email notifications
+ * Turn email categories on or off. Omitted categories are left unchanged.
  */
-export async function updateEmailNotifications(enabled: boolean): Promise<void> {
-  const response = await authenticatedFetch(`${API_BASE}/api/users/me/email-notifications`, {
+export async function updateEmailPreferences(prefs: UpdateEmailPreferencesRequest): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/users/me/email-preferences`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ enabled }),
+    body: JSON.stringify(prefs),
   })
 
   if (!response.ok) {

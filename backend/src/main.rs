@@ -18,7 +18,7 @@ use axum::{
     Router,
 };
 use routes::auth::{login_finish, login_start, register_finish, register_start, register_with_email, AppState};
-use routes::users::{get_me, accept_coc, upload_certificate, get_verification_token, update_display_name, submit_contract_request, get_my_overview, update_email, update_email_notifications, delete_my_account, export_my_data, accept_privacy, start_passkey_setup, finish_passkey_setup, get_rota_members};
+use routes::users::{get_me, accept_coc, upload_certificate, get_verification_token, update_display_name, submit_contract_request, get_my_overview, update_email, update_email_preferences, delete_my_account, export_my_data, accept_privacy, start_passkey_setup, finish_passkey_setup, get_rota_members};
 use routes::magic_link::{request_magic_link, verify_magic_link};
 use routes::admin::{get_pending_certificates, get_certificate, approve_certificate, verify_induction, get_active_members, get_unallocated_users, get_pending_contracts, approve_contract, get_bar_hours, update_bar_hours, get_overview_stats, get_all_users, promote_user, demote_user, delete_user, admin_mark_induction, admin_mark_coc, bulk_import_users, admin_upload_certificate, admin_set_contract, admin_clear_contract, admin_set_email, export_members_csv, export_shift_history_csv};
 use routes::induction::{set_induction_availability, remove_induction_availability, get_induction_dates, signup_for_induction, cancel_induction_signup, admin_mark_supervised, get_pending_induction_approvals};
@@ -120,7 +120,7 @@ async fn main() {
         .route("/api/users/me/verification-token", get(get_verification_token))
         .route("/api/users/me/contract-request", post(submit_contract_request))
         .route("/api/users/me/email", axum::routing::put(update_email))
-        .route("/api/users/me/email-notifications", axum::routing::put(update_email_notifications))
+        .route("/api/users/me/email-preferences", axum::routing::put(update_email_preferences))
         .route("/api/users/me/accept-privacy", post(accept_privacy))
         .route("/api/users/me/data", get(export_my_data))
         .route("/api/users/me", axum::routing::delete(delete_my_account))
