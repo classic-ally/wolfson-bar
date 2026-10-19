@@ -6,6 +6,8 @@ mod email;
 mod ical;
 mod models;
 mod notifications;
+mod membership_email;
+mod membership_notifications;
 mod onboarding;
 mod routes;
 mod static_files;
@@ -32,6 +34,8 @@ use routes::local::generate_jwt;
 use routes::stock::{create_product, lookup_barcode, add_barcode, create_transactions, get_products};
 use routes::term_weeks::get_term_weeks;
 use routes::coc::{get_current_coc, publish_coc, list_coc_versions};
+use routes::membership::{get_training_links, put_training_links, list_email_templates, put_email_template, preview_email_template, send_test_email_template, get_onboarding_settings, put_onboarding_settings};
+use routes::onboarding::{get_onboarding, send_onboarding_reminder};
 use sqlx::sqlite::SqlitePoolOptions;
 use rand::Rng;
 use std::net::SocketAddr;
@@ -172,6 +176,15 @@ async fn main() {
         .route("/api/coc/current", get(get_current_coc))
         .route("/api/admin/coc", post(publish_coc))
         .route("/api/admin/coc/versions", get(list_coc_versions))
+        .route("/api/training-links", get(get_training_links))
+        .route("/api/admin/training-links", axum::routing::put(put_training_links))
+        .route("/api/admin/email-templates", get(list_email_templates))
+        .route("/api/admin/email-templates/:key", axum::routing::put(put_email_template))
+        .route("/api/admin/email-templates/:key/preview", post(preview_email_template))
+        .route("/api/admin/email-templates/:key/test", post(send_test_email_template))
+        .route("/api/admin/onboarding-settings", get(get_onboarding_settings).put(put_onboarding_settings))
+        .route("/api/admin/onboarding", get(get_onboarding))
+        .route("/api/admin/users/:user_id/send-reminder", post(send_onboarding_reminder))
         .route("/api/admin/users/bulk-import", post(bulk_import_users))
         .route("/api/admin/users/:user_id/upload-certificate", post(admin_upload_certificate))
         .route("/api/admin/users/:user_id/set-contract", post(admin_set_contract))

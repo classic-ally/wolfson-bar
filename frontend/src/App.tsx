@@ -8,6 +8,7 @@ import AdminLayout from './components/AdminLayout'
 import AdminUsers from './components/admin/AdminUsers'
 import AdminBulkImport from './components/admin/AdminBulkImport'
 import AdminCodeOfConduct from './components/admin/AdminCodeOfConduct'
+import AdminMembershipEmails from './components/admin/AdminMembershipEmails'
 import CommitteeOverview from './components/committee/CommitteeOverview'
 import CommitteeEvents from './components/committee/CommitteeEvents'
 import CommitteeHours from './components/committee/CommitteeHours'
@@ -15,6 +16,7 @@ import CommitteeStock from './components/committee/CommitteeStock'
 import CommitteeStockUpdate from './components/committee/CommitteeStockUpdate'
 import CommitteeMembers from './components/committee/CommitteeMembers'
 import CommitteeInduction from './components/committee/CommitteeInduction'
+import CommitteeOnboarding from './components/committee/CommitteeOnboarding'
 import CommitteeRotaManager from './components/committee/CommitteeRotaManager'
 import CommitteeExport from './components/committee/CommitteeExport'
 import OnboardingStatusBar from './components/OnboardingStatusBar'
@@ -418,6 +420,7 @@ function AppShell() {
             <Route path="stock/update" element={<CommitteeStockUpdate />} />
             <Route path="members" element={<CommitteeMembers />} />
             <Route path="induction" element={<CommitteeInduction />} />
+            <Route path="onboarding" element={<CommitteeOnboarding />} />
             <Route path="rotamanager" element={<CommitteeRotaManager />} />
             <Route path="export" element={<CommitteeExport />} />
             <Route path="kiosk" element={<CommitteeKiosk />} />
@@ -427,6 +430,7 @@ function AppShell() {
             <Route index element={<AdminUsers />} />
             <Route path="import" element={<AdminBulkImport />} />
             <Route path="coc" element={<AdminCodeOfConduct />} />
+            <Route path="emails" element={<AdminMembershipEmails />} />
           </Route>
         </Routes>
       </ErrorBoundary>

@@ -2,6 +2,13 @@ import { startRegistration, startAuthentication } from '@simplewebauthn/browser'
 import type { AuthResponse } from '../types/AuthResponse'
 import type { UserStatus } from '../types/UserStatus'
 import type { UpdateEmailPreferencesRequest } from '../types/UpdateEmailPreferencesRequest'
+import type { TrainingLink } from '../types/TrainingLink'
+import type { EmailTemplate } from '../types/EmailTemplate'
+import type { EmailTemplateDraft } from '../types/EmailTemplateDraft'
+import type { RenderedEmail } from '../types/RenderedEmail'
+import type { TemplateKey } from '../types/TemplateKey'
+import type { OnboardingSettings } from '../types/OnboardingSettings'
+import type { OnboardingRow } from '../types/OnboardingRow'
 import type { PendingCertificate } from '../types/PendingCertificate'
 import type { ActiveMember } from '../types/ActiveMember'
 import type { RotaMember } from '../types/RotaMember'
@@ -1453,5 +1460,134 @@ export async function closeBar(): Promise<void> {
   if (!response.ok) {
     const error = await response.json()
     throw new AuthError(error.error || 'Failed to close bar')
+  }
+}
+
+// ===== Membership email content =====
+
+/**
+ * Training links shown on the onboarding checklist (any signed-in member)
+ */
+export async function getTrainingLinks(): Promise<TrainingLink[]> {
+  const response = await authenticatedFetch(`${API_BASE}/api/training-links`)
+  if (!response.ok) {
+    throw await responseError(response, 'Failed to load training links')
+  }
+  return response.json()
+}
+
+/**
+ * Replace the training links, in order (admin only)
+ */
+export async function putTrainingLinks(links: TrainingLink[]): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/training-links`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(links),
+  })
+  if (!response.ok) {
+    throw await responseError(response, 'Failed to save training links')
+  }
+}
+
+/**
+ * Every membership email template (admin only)
+ */
+export async function getEmailTemplates(): Promise<EmailTemplate[]> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/email-templates`)
+  if (!response.ok) {
+    throw await responseError(response, 'Failed to load email templates')
+  }
+  return response.json()
+}
+
+/**
+ * Save a membership email template (admin only)
+ */
+export async function putEmailTemplate(key: TemplateKey, draft: EmailTemplateDraft): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/email-templates/${key}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(draft),
+  })
+  if (!response.ok) {
+    throw await responseError(response, 'Failed to save email template')
+  }
+}
+
+/**
+ * Render a draft template for an example member (admin only)
+ */
+export async function previewEmailTemplate(key: TemplateKey, draft: EmailTemplateDraft): Promise<RenderedEmail> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/email-templates/${key}/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(draft),
+  })
+  if (!response.ok) {
+    throw await responseError(response, 'Failed to preview email')
+  }
+  return response.json()
+}
+
+/**
+ * Send a draft template to the signed-in admin's own address (admin only)
+ */
+export async function sendTestEmailTemplate(key: TemplateKey, draft: EmailTemplateDraft): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/email-templates/${key}/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(draft),
+  })
+  if (!response.ok) {
+    throw await responseError(response, 'Failed to send test email')
+  }
+}
+
+/**
+ * Membership email schedule settings (admin only)
+ */
+export async function getOnboardingSettings(): Promise<OnboardingSettings> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/onboarding-settings`)
+  if (!response.ok) {
+    throw await responseError(response, 'Failed to load email settings')
+  }
+  return response.json()
+}
+
+/**
+ * Save membership email schedule settings (admin only)
+ */
+export async function putOnboardingSettings(settings: OnboardingSettings): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/onboarding-settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  })
+  if (!response.ok) {
+    throw await responseError(response, 'Failed to save email settings')
+  }
+}
+
+/**
+ * Every member's onboarding progress (committee only)
+ */
+export async function getOnboarding(): Promise<OnboardingRow[]> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/onboarding`)
+  if (!response.ok) {
+    throw await responseError(response, 'Failed to load onboarding progress')
+  }
+  return response.json()
+}
+
+/**
+ * Email a member the onboarding steps they have left (committee only)
+ */
+export async function sendOnboardingReminder(userId: string): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/users/${userId}/send-reminder`, {
+    method: 'POST',
+  })
+  if (!response.ok) {
+    throw await responseError(response, 'Failed to send reminder')
   }
 }

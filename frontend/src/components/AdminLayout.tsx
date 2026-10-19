@@ -14,6 +14,7 @@ export default function AdminLayout() {
     { path: '/admin', label: 'Users' },
     { path: '/admin/import', label: 'Import Users' },
     { path: '/admin/coc', label: 'Code of Conduct' },
+    { path: '/admin/emails', label: 'Membership Emails' },
   ]
 
   return (

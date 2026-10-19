@@ -50,6 +50,10 @@ pub struct User {
     #[sqlx(default)]
     pub food_safety_certificate_type: Option<String>,
     pub induction_completed: bool,
+    /// When the induction was marked; NULL for members inducted before
+    /// timestamps were recorded.
+    #[sqlx(default)]
+    pub induction_completed_at: Option<String>,
     pub has_contract: bool,
     pub contract_expiry_date: Option<String>,
     pub created_at: String,
@@ -104,6 +108,7 @@ impl User {
             food_safety_certificate: None,
             food_safety_certificate_type: None,
             induction_completed: false,
+            induction_completed_at: None,
             has_contract: false,
             contract_expiry_date: None,
             created_at: chrono::Utc::now().to_rfc3339(),

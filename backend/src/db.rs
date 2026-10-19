@@ -1,6 +1,6 @@
 use sqlx::SqlitePool;
 
-const MIGRATIONS: &[(&str, &str, &[&str])] = &[
+pub(crate) const MIGRATIONS: &[(&str, &str, &[&str])] = &[
     ("001_init", include_str!("../migrations/001_init.sql"), &[]),
     ("002_events", include_str!("../migrations/002_events.sql"), &[]),
     ("003_shifts", include_str!("../migrations/003_shifts.sql"), &["duplicate column"]),
@@ -17,6 +17,8 @@ const MIGRATIONS: &[(&str, &str, &[&str])] = &[
     ("014_coc_versions", include_str!("../migrations/014_coc_versions.sql"), &["duplicate column"]),
     ("015_email_categories", include_str!("../migrations/015_email_categories.sql"), &["duplicate column"]),
     ("016_onboarding_timestamps", include_str!("../migrations/016_onboarding_timestamps.sql"), &["duplicate column"]),
+    ("017_membership_content", include_str!("../migrations/017_membership_content.sql"), &[]),
+    ("018_membership_email_log", include_str!("../migrations/018_membership_email_log.sql"), &["already exists"]),
 ];
 
 pub async fn run_migrations(db: &SqlitePool) {

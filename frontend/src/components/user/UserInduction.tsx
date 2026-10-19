@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { getUserStatus, uploadCertificate, getInductionDates, signupForInduction, cancelInductionSignup, getVerificationToken, canSignupForShifts, isRotaMember, needsCocResign } from '../../lib/auth'
+import { getUserStatus, uploadCertificate, getInductionDates, signupForInduction, cancelInductionSignup, getVerificationToken, canSignupForShifts, isRotaMember, needsCocResign, getTrainingLinks } from '../../lib/auth'
 import type { UserStatus } from '../../types/UserStatus'
 import type { InductionDate } from '../../types/InductionDate'
+import type { TrainingLink } from '../../types/TrainingLink'
 import { usePageTitle } from '../../hooks/usePageTitle'
 import QRCode from 'qrcode'
 import CodeOfConduct from '../CodeOfConduct'
@@ -19,10 +20,14 @@ export default function UserInduction() {
   const [showQR, setShowQR] = useState(false)
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [generatingQR, setGeneratingQR] = useState(false)
+  const [trainingLinks, setTrainingLinks] = useState<TrainingLink[]>([])
   usePageTitle('Onboarding')
 
   useEffect(() => {
     loadStatus()
+    getTrainingLinks()
+      .then(setTrainingLinks)
+      .catch((err) => console.error('Failed to fetch training links:', err))
   }, [])
 
   useEffect(() => {
@@ -399,6 +404,15 @@ export default function UserInduction() {
           <p style={{ color: '#666', fontSize: '14px' }}>
             Complete the online food safety course and upload your certificate.
           </p>
+          {!status.food_safety_completed && trainingLinks.length > 0 && (
+            <ul style={{ fontSize: '14px', margin: '0 0 12px', paddingLeft: '20px' }}>
+              {trainingLinks.map((link) => (
+                <li key={link.url}>
+                  <a href={link.url} target="_blank" rel="noopener noreferrer">{link.label}</a>
+                </li>
+              ))}
+            </ul>
+          )}
           {!status.food_safety_completed && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <label

@@ -73,6 +73,17 @@ pub fn start_notification_worker(db: SqlitePool, email_service: EmailService, pu
                 error!("Induction notification job failed: {}", e);
             }
 
+            if let Err(e) = crate::membership_notifications::send_membership_emails(
+                &db,
+                &email_service,
+                &public_url,
+                chrono::Utc::now(),
+            )
+            .await
+            {
+                error!("Membership email job failed: {}", e);
+            }
+
             // Sleep at least 1 hour to avoid running twice in the same hour
             tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
         }

@@ -12,3 +12,5 @@ pub mod magic_link;
 pub mod induction;
 pub mod kiosk;
 pub mod coc;
+pub mod membership;
+pub mod onboarding;
