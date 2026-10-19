@@ -172,10 +172,7 @@ pub async fn approve_certificate(
     info!("✅ Committee member {} approving certificate for user {}", user.id, target_user_id);
 
     // Mark certificate as approved (keep BLOB for audit trail)
-    sqlx::query("UPDATE users SET food_safety_completed = ? WHERE id = ?")
-        .bind(true)
-        .bind(&target_user_id)
-        .execute(&state.db)
+    crate::onboarding::approve_certificate(&state.db, &target_user_id, state.clock.now())
         .await
         .map_err(|e| {
             error!("❌ Failed to approve certificate: {}", e);
@@ -245,10 +242,7 @@ pub async fn verify_induction(
     info!("✅ Committee member {} verifying induction for user {}", committee_user.id, target_user_id);
 
     // Mark induction as completed
-    sqlx::query("UPDATE users SET induction_completed = ? WHERE id = ?")
-        .bind(true)
-        .bind(&target_user_id)
-        .execute(&state.db)
+    crate::onboarding::mark_inducted(&state.db, &target_user_id, state.clock.now())
         .await
         .map_err(|e| {
             error!("❌ Failed to mark induction complete: {}", e);
@@ -918,9 +912,7 @@ pub async fn admin_mark_induction(
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
     info!("✅ Committee member {} marking induction complete for user {}", approver.id, target_user_id);
 
-    let result = sqlx::query("UPDATE users SET induction_completed = TRUE WHERE id = ?")
-        .bind(&target_user_id)
-        .execute(&state.db)
+    let rows = crate::onboarding::mark_inducted(&state.db, &target_user_id, state.clock.now())
         .await
         .map_err(|e| {
             error!("❌ Failed to mark induction: {}", e);
@@ -932,7 +924,7 @@ pub async fn admin_mark_induction(
             )
         })?;
 
-    if result.rows_affected() == 0 {
+    if rows == 0 {
         return Err((
             StatusCode::NOT_FOUND,
             Json(ErrorResponse {
@@ -942,6 +934,38 @@ pub async fn admin_mark_induction(
     }
 
     info!("✅ Induction marked complete for user {}", target_user_id);
+    Ok(StatusCode::OK)
+}
+
+/// Undo an induction marked by mistake (any committee member may undo)
+pub async fn admin_unmark_induction(
+    State(state): State<AppState>,
+    CommitteeUser(approver): CommitteeUser,
+    Path(target_user_id): Path<String>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    info!("↩️ Committee member {} unmarking induction for user {}", approver.id, target_user_id);
+
+    let rows = crate::onboarding::unmark_inducted(&state.db, &target_user_id)
+        .await
+        .map_err(|e| {
+            error!("❌ Failed to unmark induction: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to unmark induction".to_string(),
+                }),
+            )
+        })?;
+
+    if rows == 0 {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "User not found".to_string(),
+            }),
+        ));
+    }
+
     Ok(StatusCode::OK)
 }
 
@@ -1165,11 +1189,7 @@ pub async fn admin_upload_certificate(
     );
 
     // Store certificate and auto-approve
-    sqlx::query("UPDATE users SET food_safety_certificate = ?, food_safety_certificate_type = ?, food_safety_completed = TRUE WHERE id = ?")
-        .bind(&file_bytes)
-        .bind(stored_type)
-        .bind(&target_user_id)
-        .execute(&state.db)
+    crate::onboarding::record_certificate(&state.db, &target_user_id, &file_bytes, stored_type, true, state.clock.now())
         .await
         .map_err(|e| {
             error!("❌ Failed to store certificate: {}", e);

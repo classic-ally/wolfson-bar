@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { getAllUsers, promoteUser, demoteUser, deleteUser, markCoC, markInduction, markSupervisedShift, adminUploadCertificate, adminSetEmail, getUserId } from '../../lib/auth'
+import { getAllUsers, promoteUser, demoteUser, deleteUser, markCoC, markInduction, unmarkInduction, markSupervisedShift, unmarkSupervisedShift, adminUploadCertificate, adminSetEmail, getUserId } from '../../lib/auth'
 import type { UserListItem } from '../../types/UserListItem'
 import { usePageTitle } from '../../hooks/usePageTitle'
 import ContractModal from './ContractModal'
@@ -31,7 +31,9 @@ function ActionsDropdown({ user, currentUserId, isLastAdmin, actionInProgress, o
     { label: 'Demote', action: 'demote', show: user.is_admin || user.is_committee, disabledReason: isLastAdmin ? 'Last admin' : undefined },
     { label: 'Mark CoC Signed', action: 'mark-coc', show: !user.code_of_conduct_signed },
     { label: 'Mark Inducted', action: 'mark-induction', show: !user.induction_completed },
+    { label: 'Unmark Inducted', action: 'unmark-induction', show: user.induction_completed },
     { label: 'Mark Supervised Shift', action: 'mark-supervised', show: !user.supervised_shift_completed },
+    { label: 'Unmark Supervised Shift', action: 'unmark-supervised', show: user.supervised_shift_completed },
     { label: 'Upload Certificate', action: 'upload-cert', show: true },
     { label: 'Set Email', action: 'set-email', show: true },
     { label: 'Manage Contract', action: 'manage-contract', show: true },
@@ -188,6 +190,32 @@ export default function AdminUsers() {
           await loadUsers()
         } catch (err) {
           alert(err instanceof Error ? err.message : 'Failed to mark induction complete')
+        } finally {
+          setActionInProgress(null)
+        }
+        break
+      }
+      case 'unmark-induction': {
+        if (!confirm('Unmark induction for this user? Use this to undo a mistake; any post-induction email not yet sent will be cancelled.')) return
+        setActionInProgress(userId)
+        try {
+          await unmarkInduction(userId)
+          await loadUsers()
+        } catch (err) {
+          alert(err instanceof Error ? err.message : 'Failed to unmark induction')
+        } finally {
+          setActionInProgress(null)
+        }
+        break
+      }
+      case 'unmark-supervised': {
+        if (!confirm('Unmark supervised shift for this user? They will need a committee member on their next shift.')) return
+        setActionInProgress(userId)
+        try {
+          await unmarkSupervisedShift(userId)
+          await loadUsers()
+        } catch (err) {
+          alert(err instanceof Error ? err.message : 'Failed to unmark supervised shift')
         } finally {
           setActionInProgress(null)
         }

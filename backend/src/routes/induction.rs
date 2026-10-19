@@ -384,20 +384,40 @@ pub async fn admin_mark_supervised(
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
     info!("Committee member {} marking supervised shift complete for user {}", approver.id, target_user_id);
 
-    let result = sqlx::query("UPDATE users SET supervised_shift_completed = TRUE WHERE id = ?")
-        .bind(&target_user_id)
-        .execute(&state.db)
+    let rows = crate::onboarding::mark_supervised(&state.db, &target_user_id, state.clock.now())
         .await
         .map_err(|e| {
             error!("Failed to mark supervised shift: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Failed to mark supervised shift complete".to_string() }))
         })?;
 
-    if result.rows_affected() == 0 {
+    if rows == 0 {
         return Err((StatusCode::NOT_FOUND, Json(ErrorResponse { error: "User not found".to_string() })));
     }
 
     info!("Supervised shift marked complete for user {}", target_user_id);
+    Ok(StatusCode::OK)
+}
+
+/// Undo a supervised shift marked by mistake (any committee member may undo)
+pub async fn admin_unmark_supervised(
+    State(state): State<AppState>,
+    CommitteeUser(approver): CommitteeUser,
+    Path(target_user_id): Path<String>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    info!("Committee member {} unmarking supervised shift for user {}", approver.id, target_user_id);
+
+    let rows = crate::onboarding::unmark_supervised(&state.db, &target_user_id)
+        .await
+        .map_err(|e| {
+            error!("Failed to unmark supervised shift: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Failed to unmark supervised shift".to_string() }))
+        })?;
+
+    if rows == 0 {
+        return Err((StatusCode::NOT_FOUND, Json(ErrorResponse { error: "User not found".to_string() })));
+    }
+
     Ok(StatusCode::OK)
 }
 

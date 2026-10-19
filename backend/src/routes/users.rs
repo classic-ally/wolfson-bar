@@ -218,11 +218,7 @@ pub async fn upload_certificate(
     );
 
     // Store BLOB and content type in database
-    sqlx::query("UPDATE users SET food_safety_certificate = ?, food_safety_certificate_type = ? WHERE id = ?")
-        .bind(&file_bytes)
-        .bind(stored_type)
-        .bind(&user.id)
-        .execute(&state.db)
+    crate::onboarding::record_certificate(&state.db, &user.id, &file_bytes, stored_type, false, state.clock.now())
         .await
         .map_err(|e| {
             error!("❌ Failed to store certificate: {}", e);

@@ -16,6 +16,7 @@ const MIGRATIONS: &[(&str, &str, &[&str])] = &[
     ("013_kiosk_pairing_meta", include_str!("../migrations/013_kiosk_pairing_meta.sql"), &["duplicate column"]),
     ("014_coc_versions", include_str!("../migrations/014_coc_versions.sql"), &["duplicate column"]),
     ("015_email_categories", include_str!("../migrations/015_email_categories.sql"), &["duplicate column"]),
+    ("016_onboarding_timestamps", include_str!("../migrations/016_onboarding_timestamps.sql"), &["duplicate column"]),
 ];
 
 pub async fn run_migrations(db: &SqlitePool) {

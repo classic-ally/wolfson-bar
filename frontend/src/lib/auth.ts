@@ -1080,6 +1080,34 @@ export async function markInduction(userId: string): Promise<void> {
 }
 
 /**
+ * Undo an induction marked by mistake (committee only)
+ */
+export async function unmarkInduction(userId: string): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/users/${userId}/unmark-induction`, {
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to unmark induction')
+  }
+}
+
+/**
+ * Undo a supervised shift marked by mistake (committee only)
+ */
+export async function unmarkSupervisedShift(userId: string): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/users/${userId}/unmark-supervised`, {
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to unmark supervised shift')
+  }
+}
+
+/**
  * Delete a user (admin only)
  */
 export async function deleteUser(userId: string): Promise<void> {
