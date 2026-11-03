@@ -11,6 +11,7 @@ const future = new Date('2026-06-01T00:00:00')
 function shift(opts: Partial<ShiftInfo> = {}): ShiftInfo {
   return {
     date: '2026-06-01',
+    slot: '',
     event_title: null,
     event_description: null,
     max_volunteers: 4,
@@ -36,6 +37,7 @@ function event(title: string, id = '1'): Event {
     end_time: '23:00',
     shift_max_volunteers: null,
     shift_requires_contract: null,
+    staff_separately: false,
   }
 }
 
@@ -57,7 +59,7 @@ const meta = {
     day: { date: future } as never,
     modifiers: { selected: false, today: false, disabled: false } as never,
     buttonProps: {} as never,
-    shift: undefined,
+    shifts: [],
     events: [],
     termLabel: undefined,
     inductionDate: undefined,
@@ -72,47 +74,47 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const Empty: Story = {
-  args: { shift: shift({ signups_count: 0 }) },
+  args: { shifts: [shift({ signups_count: 0 })] },
 }
 
 export const Partial: Story = {
-  args: { shift: shift({ signups_count: 2 }) },
+  args: { shifts: [shift({ signups_count: 2 })] },
 }
 
 export const Full: Story = {
   args: {
-    shift: shift({
+    shifts: [shift({
       signups_count: 4,
       signups: Array.from({ length: 4 }).map((_, i) => ({
         user_id: `u${i}`,
         display_name: `V${i}`,
         is_committee: false,
       })),
-    }),
+    })],
   },
 }
 
 export const Paid: Story = {
-  args: { shift: shift({ requires_contract: true, signups_count: 1 }) },
+  args: { shifts: [shift({ requires_contract: true, signups_count: 1 })] },
 }
 
 export const SingleEvent: Story = {
   args: {
-    shift: shift({ signups_count: 1 }),
+    shifts: [shift({ signups_count: 1 })],
     events: [event('Quiz Night')],
   },
 }
 
 export const TwoEvents: Story = {
   args: {
-    shift: shift({ signups_count: 1 }),
+    shifts: [shift({ signups_count: 1 })],
     events: [event('Quiz Night', '1'), event('Open Mic', '2')],
   },
 }
 
 export const ThreeEvents: Story = {
   args: {
-    shift: shift({ signups_count: 1 }),
+    shifts: [shift({ signups_count: 1 })],
     events: [
       event('Quiz Night', '1'),
       event('Open Mic', '2'),
@@ -123,7 +125,7 @@ export const ThreeEvents: Story = {
 
 export const FourEvents: Story = {
   args: {
-    shift: shift({ signups_count: 1 }),
+    shifts: [shift({ signups_count: 1 })],
     events: [
       event('Quiz Night', '1'),
       event('Open Mic', '2'),
@@ -135,7 +137,7 @@ export const FourEvents: Story = {
 
 export const WithInduction: Story = {
   args: {
-    shift: shift({ has_induction_availability: true }),
+    shifts: [shift({ has_induction_availability: true })],
     inductionDate: {
       date: '2026-06-01',
       has_full_shift_committee: true,
@@ -149,21 +151,21 @@ export const WithInduction: Story = {
 
 export const OwnInduction: Story = {
   args: {
-    shift: shift({
+    shifts: [shift({
       has_induction_availability: true,
       current_user_induction_available: true,
       induction_signups_count: 2,
-    }),
+    })],
   },
 }
 
 export const TermLabel: Story = {
-  args: { shift: shift({ signups_count: 1 }), termLabel: 'TT2' },
+  args: { shifts: [shift({ signups_count: 1 })], termLabel: 'TT2' },
 }
 
 export const Selected: Story = {
   args: {
-    shift: shift({ signups_count: 2 }),
+    shifts: [shift({ signups_count: 2 })],
     modifiers: { selected: true, today: false, disabled: false } as never,
   },
 }
@@ -171,7 +173,7 @@ export const Selected: Story = {
 export const Today: Story = {
   args: {
     day: { date: today } as never,
-    shift: shift({ date: '2026-05-27', signups_count: 1 }),
+    shifts: [shift({ date: '2026-05-27', signups_count: 1 })],
     modifiers: { selected: false, today: true, disabled: false } as never,
   },
 }
@@ -179,13 +181,13 @@ export const Today: Story = {
 export const PastDate: Story = {
   args: {
     day: { date: new Date('2026-05-20T00:00:00') } as never,
-    shift: shift({ date: '2026-05-20', signups_count: 0 }),
+    shifts: [shift({ date: '2026-05-20', signups_count: 0 })],
   },
 }
 
 export const UserBooked: Story = {
   args: {
-    shift: shift({ signups_count: 2 }),
+    shifts: [shift({ signups_count: 2 })],
     userAlreadyOn: true,
   },
 }
@@ -214,28 +216,38 @@ const unsupervisedViewer = {
 
 export const SupervisedShiftAvailable: Story = {
   args: {
-    shift: shift({
+    shifts: [shift({
       signups_count: 1,
       signups: [{ user_id: 'u-committee', display_name: 'Committee', is_committee: true }],
-    }),
+    })],
     viewerContext: unsupervisedViewer,
   },
 }
 
 export const NoSupervisorYet: Story = {
   args: {
-    shift: shift({
+    shifts: [shift({
       signups_count: 1,
       signups: [{ user_id: 'u-other', display_name: 'Volunteer', is_committee: false }],
-    }),
+    })],
     viewerContext: unsupervisedViewer,
   },
 }
 
 export const PublicView: Story = {
   args: {
-    shift: shift({ signups_count: 0, requires_contract: true }),
+    shifts: [shift({ signups_count: 0, requires_contract: true })],
     events: [event('Live Music')],
     viewerContext: { kind: 'public' as const },
+  },
+}
+
+export const SplitNight: Story = {
+  args: {
+    shifts: [
+      shift({ slot: 'evt-early', event_title: 'Pre-drinks', max_volunteers: 2, signups_count: 2 }),
+      shift({ slot: 'evt-late', event_title: 'Party', max_volunteers: 4, signups_count: 1 }),
+    ],
+    events: [event('Pre-drinks', '1'), event('Party', '2')],
   },
 }

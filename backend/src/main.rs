@@ -10,6 +10,7 @@ mod membership_email;
 mod membership_notifications;
 mod onboarding;
 mod routes;
+mod slots;
 mod static_files;
 
 #[cfg(test)]
@@ -27,7 +28,7 @@ use routes::admin::{get_pending_certificates, get_certificate, approve_certifica
 use routes::induction::{set_induction_availability, remove_induction_availability, get_induction_dates, signup_for_induction, cancel_induction_signup, admin_mark_supervised, admin_unmark_supervised, get_pending_induction_approvals};
 use routes::kiosk::{pair_start, pair_approve, pair_status, pair_info, list_devices, revoke_device, get_checkin_code, check_in, get_bar_status, close_bar};
 use routes::events::{get_events, get_event, create_event, update_event, delete_event};
-use routes::shifts::{get_shifts, signup_for_shift, cancel_shift_signup, get_my_shifts, admin_assign_to_shift, admin_remove_from_shift};
+use routes::shifts::{get_shifts, signup_for_shift, signup_for_whole_night, cancel_shift_signup, get_my_shifts, admin_assign_to_shift, admin_remove_from_shift};
 use routes::calendar::{get_calendar_feed, download_event, get_user_calendar};
 #[cfg(debug_assertions)]
 use routes::local::generate_jwt;
@@ -158,6 +159,7 @@ async fn main() {
         .route("/api/shifts", get(get_shifts))
         .route("/api/shifts/:date/signup", post(signup_for_shift))
         .route("/api/shifts/:date/signup", axum::routing::delete(cancel_shift_signup))
+        .route("/api/shifts/:date/signup-all", post(signup_for_whole_night))
         .route("/api/users/me/shifts", get(get_my_shifts))
         .route("/api/admin/shifts/:date/:user_id", post(admin_assign_to_shift).delete(admin_remove_from_shift))
         .route("/api/admin/stock/products", get(get_products))

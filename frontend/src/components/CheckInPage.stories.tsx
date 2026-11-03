@@ -32,7 +32,7 @@ export const CheckedIn: Story = {
     msw: {
       handlers: [
         http.post('*/api/shifts/check-in', () =>
-          HttpResponse.json({ shift_date: '2026-06-19', was_signed_up: true, bar_open: true }),
+          HttpResponse.json({ shift_date: '2026-06-19', slot_title: null, was_signed_up: true, bar_open: true }),
         ),
       ],
     },

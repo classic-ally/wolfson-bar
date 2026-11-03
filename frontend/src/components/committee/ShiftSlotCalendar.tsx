@@ -72,9 +72,14 @@ export default function ShiftSlotCalendar({
   selected,
   onSelect,
 }: ShiftSlotCalendarProps) {
-  const shiftByDate = useMemo(() => {
-    const m = new Map<string, ShiftInfo>()
-    for (const s of shifts) m.set(s.date, s)
+  // A night split into separately-staffed events has several shifts.
+  const shiftsByDate = useMemo(() => {
+    const m = new Map<string, ShiftInfo[]>()
+    for (const s of shifts) {
+      const list = m.get(s.date) ?? []
+      list.push(s)
+      m.set(s.date, list)
+    }
     return m
   }, [shifts])
 
@@ -178,7 +183,7 @@ export default function ShiftSlotCalendar({
               day={day}
               modifiers={modifiers}
               buttonProps={buttonProps}
-              shift={shiftByDate.get(dateStr)}
+              shifts={shiftsByDate.get(dateStr) ?? []}
               events={eventsByDate.get(dateStr) ?? []}
               termLabel={termWeekByDate.get(dateStr)}
               inductionDate={inductionByDate.get(dateStr)}

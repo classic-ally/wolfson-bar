@@ -10,6 +10,7 @@ use tracing::error;
 
 use crate::ical::{ShiftIcalParams, create_shift_ical_event, shift_uid};
 use crate::routes::auth::AppState;
+use crate::slots::{shift_times, SLOT_TITLE_SQL};
 
 #[derive(Debug, FromRow)]
 struct Event {
@@ -220,16 +221,19 @@ pub async fn get_user_calendar(
     }
 
     // Get user's shifts (today onwards)
-    let shifts: Vec<(String, Option<String>)> = sqlx::query_as(
-        "SELECT shift_date,
-                (SELECT title FROM events WHERE event_date = shift_date) as event_title
-         FROM shift_signups
-         WHERE user_id = ?
-         AND shift_date >= date('now')
-         ORDER BY shift_date ASC"
-    )
+    let mut conn = state.db.acquire().await.map_err(|e| {
+        error!("❌ Failed to acquire connection: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+    })?;
+    let shifts: Vec<(String, String, Option<String>)> = sqlx::query_as(&format!(
+        "SELECT ss.shift_date, ss.slot, {SLOT_TITLE_SQL} as event_title
+         FROM shift_signups ss
+         WHERE ss.user_id = ?
+         AND ss.shift_date >= date('now')
+         ORDER BY ss.shift_date ASC"
+    ))
     .bind(&user_id)
-    .fetch_all(&state.db)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|e| {
         error!("❌ Failed to fetch user shifts: {}", e);
@@ -241,21 +245,18 @@ pub async fn get_user_calendar(
     calendar.name("Wolfson Bar - My Shifts");
 
     // Add each shift as an event using shared helper
-    for (shift_date, event_title) in shifts {
-        let date = NaiveDate::parse_from_str(&shift_date, "%Y-%m-%d")
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Invalid date: {}", e)))?;
-
-        let day_of_week = date.weekday().num_days_from_sunday();
-        let bar_hours = get_bar_hours_for_day(&state, day_of_week)
+    for (shift_date, slot, event_title) in shifts {
+        let (open_time, close_time) = shift_times(&mut conn, &shift_date, &slot)
             .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get shift times: {}", e)))?
+            .ok_or_else(|| (StatusCode::INTERNAL_SERVER_ERROR, format!("No opening hours for {}", shift_date)))?;
 
         let params = ShiftIcalParams {
-            shift_date: shift_date.clone(),
-            event_title: event_title.clone(),
-            open_time: bar_hours.open_time,
-            close_time: bar_hours.close_time,
-            uid: shift_uid(&user_id, &shift_date),
+            uid: shift_uid(&user_id, &shift_date, &slot),
+            shift_date,
+            event_title,
+            open_time,
+            close_time,
         };
 
         let ical_event = create_shift_ical_event(&params)

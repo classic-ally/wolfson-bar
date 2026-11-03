@@ -24,14 +24,17 @@ export default function UserShifts() {
     }
   }
 
-  const handleCancelShift = async (date: string) => {
+  // A night split into separately-staffed events can hold several of the member's shifts.
+  const shiftKey = (shift: UserShift) => `${shift.date}/${shift.slot}`
+
+  const handleCancelShift = async (shift: UserShift) => {
     if (!confirm('Are you sure you want to cancel this shift?')) {
       return
     }
 
-    setCancelling(date)
+    setCancelling(shiftKey(shift))
     try {
-      await cancelShiftSignup(date)
+      await cancelShiftSignup(shift.date, shift.slot)
       loadShifts() // Refresh list
     } catch (err) {
       console.error('Failed to cancel shift:', err)
@@ -112,33 +115,41 @@ export default function UserShifts() {
               </tr>
             </thead>
             <tbody>
-              {shifts.map((shift) => (
-                <tr key={shift.date} style={{ borderBottom: '1px solid #dee2e6' }}>
+              {shifts.map((shift) => {
+                const key = shiftKey(shift)
+                return (
+                <tr key={key} style={{ borderBottom: '1px solid #dee2e6' }}>
                   <td style={{ padding: '12px 16px', fontFamily: 'monospace', fontSize: '14px' }}>
                     {formatDate(shift.date)}
+                    {shift.open_time && shift.close_time && (
+                      <div style={{ color: '#666', fontSize: '12px' }}>
+                        {shift.open_time} – {shift.close_time}
+                      </div>
+                    )}
                   </td>
                   <td style={{ padding: '12px 16px', fontSize: '14px' }}>
                     {shift.event_title || <span style={{ color: '#999', fontStyle: 'italic' }}>Regular opening</span>}
                   </td>
                   <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                     <button
-                      onClick={() => handleCancelShift(shift.date)}
-                      disabled={cancelling === shift.date}
+                      onClick={() => handleCancelShift(shift)}
+                      disabled={cancelling === key}
                       style={{
                         padding: '6px 12px',
-                        backgroundColor: cancelling === shift.date ? '#ccc' : '#dc3545',
+                        backgroundColor: cancelling === key ? '#ccc' : '#dc3545',
                         color: 'white',
                         border: 'none',
                         borderRadius: '4px',
-                        cursor: cancelling === shift.date ? 'not-allowed' : 'pointer',
+                        cursor: cancelling === key ? 'not-allowed' : 'pointer',
                         fontSize: '13px'
                       }}
                     >
-                      {cancelling === shift.date ? 'Cancelling...' : 'Cancel'}
+                      {cancelling === key ? 'Cancelling...' : 'Cancel'}
                     </button>
                   </td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </div>

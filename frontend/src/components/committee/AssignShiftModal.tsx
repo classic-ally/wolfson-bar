@@ -52,11 +52,14 @@ export default function AssignShiftModal({
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // A split night's shifts, shown for picking one after its date is clicked.
+  const [choices, setChoices] = useState<ShiftInfo[] | null>(null)
 
   useEffect(() => {
     if (!open) return
     setLoading(true)
     setError(null)
+    setChoices(null)
     const start = toDateString(fromDate)
     const end = toDateString(toDate)
     Promise.all([getShifts(start, end), getEvents(start, end), getTermWeeks()])
@@ -71,13 +74,23 @@ export default function AssignShiftModal({
       .finally(() => setLoading(false))
   }, [open, fromDate, toDate])
 
-  const handleSelect = async (date: Date) => {
+  const handleSelect = (date: Date) => {
     if (submitting) return
     const dateStr = toDateString(date)
+    const night = shifts.filter((s) => s.date === dateStr)
+    if (night.length > 1) {
+      setError(null)
+      setChoices(night)
+      return
+    }
+    assign(dateStr, '')
+  }
+
+  const assign = async (dateStr: string, slot: string) => {
     setSubmitting(true)
     setError(null)
     try {
-      await assignUserToShift(dateStr, userId)
+      await assignUserToShift(dateStr, userId, slot)
       onAssigned()
       onOpenChange(false)
     } catch (err) {
@@ -112,6 +125,29 @@ export default function AssignShiftModal({
               toDate={toDate}
               onSelect={handleSelect}
             />
+          </div>
+        )}
+
+        {choices && (
+          <div className="space-y-2 rounded-md border border-border p-3">
+            <p className="text-sm font-medium">
+              {format(new Date(choices[0].date + 'T00:00:00'), 'EEE d MMM')} has separate shifts. Which one?
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {choices.map((s) => (
+                <Button
+                  key={s.slot}
+                  variant="outline"
+                  size="sm"
+                  disabled={submitting || s.signups_count >= s.max_volunteers}
+                  onClick={() => assign(s.date, s.slot)}
+                >
+                  {s.event_title || 'Regular opening'}
+                  {s.open_time && s.close_time && ` · ${s.open_time}–${s.close_time}`}
+                  {` (${s.signups_count}/${s.max_volunteers})`}
+                </Button>
+              ))}
+            </div>
           </div>
         )}
 

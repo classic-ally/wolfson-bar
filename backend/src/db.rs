@@ -19,6 +19,7 @@ pub(crate) const MIGRATIONS: &[(&str, &str, &[&str])] = &[
     ("016_onboarding_timestamps", include_str!("../migrations/016_onboarding_timestamps.sql"), &["duplicate column"]),
     ("017_membership_content", include_str!("../migrations/017_membership_content.sql"), &[]),
     ("018_membership_email_log", include_str!("../migrations/018_membership_email_log.sql"), &["already exists"]),
+    ("019_shift_slots", include_str!("../migrations/019_shift_slots.sql"), &["duplicate column"]),
 ];
 
 pub async fn run_migrations(db: &SqlitePool) {
@@ -282,6 +283,43 @@ mod backfill_tests {
                 ("opted-in".to_string(), true, true),
                 ("opted-out".to_string(), false, false),
             ]
+        );
+    }
+
+    // Impact: 019 rebuilds shift_signups to change its primary key; losing rows
+    // would silently drop members' bookings and attendance records.
+    // Should: carry existing bookings and check-ins onto the regular shift.
+    // Should: keep them intact when migrations run again.
+    #[tokio::test]
+    async fn shift_slots_migration_keeps_bookings() {
+        let url = "sqlite:file:shift_slots_019_test?mode=memory&cache=shared";
+        let db = SqlitePoolOptions::new().max_connections(5).connect(url).await.unwrap();
+        for (_, sql, _) in super::MIGRATIONS.iter().take_while(|(name, ..)| *name != "019_shift_slots") {
+            let _ = sqlx::query(sql).execute(&db).await;
+        }
+        sqlx::query("INSERT INTO users (id, created_at) VALUES ('member', '')")
+            .execute(&db)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO shift_signups (shift_date, user_id, checked_in_at)
+             VALUES ('2026-06-19', 'member', '2026-06-19 19:40:00')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+
+        super::run_migrations(&db).await;
+        super::run_migrations(&db).await;
+
+        let rows: Vec<(String, String, Option<String>)> =
+            sqlx::query_as("SELECT shift_date, slot, checked_in_at FROM shift_signups")
+                .fetch_all(&db)
+                .await
+                .unwrap();
+        assert_eq!(
+            rows,
+            vec![("2026-06-19".to_string(), String::new(), Some("2026-06-19 19:40:00".to_string()))]
         );
     }
 }

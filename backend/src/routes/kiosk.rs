@@ -34,7 +34,7 @@ use crate::auth::{AuthenticatedUser, CommitteeUser, KioskDevice};
 use crate::constants::BAR_TZ;
 use crate::models::ErrorResponse;
 use crate::routes::auth::AppState;
-use crate::routes::shifts::{shift_requirements, ShiftRequirements};
+use crate::slots::{load_slots, slot_at, Slot};
 
 /// Rotation period for check-in codes, in seconds.
 pub const PERIOD_SECS: u64 = 30;
@@ -534,6 +534,9 @@ pub struct CheckInResponse {
     /// Shift the attendance was recorded against (`YYYY-MM-DD`); after midnight
     /// this is the previous evening's shift.
     pub shift_date: String,
+    /// Title of the shift checked into, when the night is split into
+    /// separately-staffed events or the shift has an event.
+    pub slot_title: Option<String>,
     pub was_signed_up: bool,
     /// Whether the bar reads open after this check-in. False for a check-in after
     /// the shift's scheduled close.
@@ -576,40 +579,57 @@ pub async fn check_in(
     let hours = load_bar_hours(&mut *tx).await.map_err(internal)?;
     let shift_date = active_shift_date(now_local, &hours).format("%Y-%m-%d").to_string();
 
-    let was_signed_up: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM shift_signups WHERE shift_date = ? AND user_id = ?)",
-    )
-    .bind(&shift_date)
-    .bind(&user.id)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(internal)?;
+    let slots = load_slots(&mut tx, &shift_date).await.map_err(internal)?;
+    let mine: Vec<String> = sqlx::query_scalar("SELECT slot FROM shift_signups WHERE shift_date = ? AND user_id = ?")
+        .bind(&shift_date)
+        .bind(&user.id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(internal)?;
+    let was_signed_up = !mine.is_empty();
+
+    // Minutes since the shift night's midnight, so after-midnight check-ins
+    // compare against windows running past midnight.
+    let night = NaiveDate::parse_from_str(&shift_date, "%Y-%m-%d").expect("formatted above");
+    let now_minute = (now_local - night.and_time(NaiveTime::MIN)).num_minutes().max(0) as u32;
+    let candidates: Vec<&Slot> = if was_signed_up {
+        slots.iter().filter(|s| mine.contains(&s.key)).collect()
+    } else {
+        slots.iter().collect()
+    };
+    let slot = slot_at(&candidates, now_minute);
+    let slot_key = match slot {
+        Some(s) => s.key.clone(),
+        // Booked on a shift that no longer exists on this night's plan.
+        None if was_signed_up => mine[0].clone(),
+        None => return Err(reject(StatusCode::CONFLICT, "There is no shift to check in to right now")),
+    };
 
     // A walk-in takes a slot, so it has to satisfy the same rules as signing up.
-    if !was_signed_up {
-        let ShiftRequirements { max_volunteers, requires_contract } =
-            shift_requirements(&mut *tx, &shift_date).await.map_err(internal)?;
-        if requires_contract && !user.has_contract {
+    if let (false, Some(slot)) = (was_signed_up, slot) {
+        if slot.requires_contract && !user.has_contract {
             return Err(reject(StatusCode::FORBIDDEN, "This shift requires a valid contract"));
         }
-        let signed_up: i32 = sqlx::query_scalar("SELECT COUNT(*) FROM shift_signups WHERE shift_date = ?")
+        let signed_up: i32 = sqlx::query_scalar("SELECT COUNT(*) FROM shift_signups WHERE shift_date = ? AND slot = ?")
             .bind(&shift_date)
+            .bind(&slot.key)
             .fetch_one(&mut *tx)
             .await
             .map_err(internal)?;
-        if signed_up >= max_volunteers {
+        if signed_up >= slot.max_volunteers {
             return Err(reject(StatusCode::CONFLICT, "This shift is already full"));
         }
     }
 
     // Stamp attendance (first scan wins); auto-create the signup row for a walk-in.
     sqlx::query(
-        "INSERT INTO shift_signups (shift_date, user_id, checked_in_at)
-         VALUES (?, ?, ?)
-         ON CONFLICT(shift_date, user_id)
+        "INSERT INTO shift_signups (shift_date, slot, user_id, checked_in_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(shift_date, slot, user_id)
          DO UPDATE SET checked_in_at = COALESCE(shift_signups.checked_in_at, excluded.checked_in_at)",
     )
     .bind(&shift_date)
+    .bind(&slot_key)
     .bind(&user.id)
     .bind(&now_ts)
     .execute(&mut *tx)
@@ -641,6 +661,7 @@ pub async fn check_in(
 
     Ok(Json(CheckInResponse {
         shift_date,
+        slot_title: slot.and_then(|s| s.title.clone()),
         was_signed_up,
         bar_open: already_open || within_hours,
     }))
@@ -718,7 +739,7 @@ mod tests {
     use super::*;
     use crate::clock::Clock;
     use crate::test_util::{
-        body_json, get_req, insert_event, insert_shift_signup, insert_user, json_post, london, set_bar_hours,
+        body_json, get_req, insert_event, insert_separate_event, insert_shift_signup, insert_slot_signup, insert_user, json_post, london, set_bar_hours,
         test_state, test_state_at, token_for, user_with, user_with_role,
     };
     use axum::http::StatusCode as Status;
@@ -1179,6 +1200,45 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.status(), Status::FORBIDDEN);
+    }
+
+    // --- split nights ---
+
+    // Should: check a member into the shift they booked, even when another shift is running.
+    // Should: name the shift checked into.
+    #[tokio::test]
+    async fn check_in_lands_on_the_members_own_shift() {
+        let state = test_state_at(london(2026, 6, 19, 19, 0)).await;
+        insert_separate_event(&state.db, "early", "2026-06-19", "18:30", "21:00", None).await;
+        insert_separate_event(&state.db, "late", "2026-06-19", "21:00", "02:00", None).await;
+        let (member, token) = rota_member(&state).await;
+        insert_slot_signup(&state.db, &member.id, "2026-06-19", "late").await;
+
+        let res = check_in_as(&state, &token).await;
+        assert_eq!(res.status(), Status::OK);
+        let body = body_json(res).await;
+        assert_eq!(body["slot_title"], "late");
+        assert_eq!(body["was_signed_up"], true);
+        let stamped: Option<String> = sqlx::query_scalar(
+            "SELECT checked_in_at FROM shift_signups WHERE shift_date = '2026-06-19' AND slot = 'late'",
+        )
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+        assert!(stamped.is_some());
+    }
+
+    // Should: put a walk-in on the shift running at the time they check in.
+    #[tokio::test]
+    async fn walk_in_lands_on_the_shift_running_now() {
+        let state = test_state_at(london(2026, 6, 19, 19, 0)).await;
+        insert_separate_event(&state.db, "early", "2026-06-19", "18:30", "21:00", None).await;
+        insert_separate_event(&state.db, "late", "2026-06-19", "21:00", "02:00", None).await;
+        let (_, token) = rota_member(&state).await;
+
+        let res = check_in_as(&state, &token).await;
+        assert_eq!(res.status(), Status::OK);
+        assert_eq!(body_json(res).await["slot_title"], "early");
     }
 
     // --- kiosk secret ---

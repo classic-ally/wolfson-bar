@@ -154,7 +154,7 @@ export default function EventManagement({ onEventsChange }: EventManagementProps
                       {event.description}
                     </div>
                   )}
-                  {(event.shift_max_volunteers !== null || event.shift_requires_contract) && (
+                  {(event.shift_max_volunteers !== null || event.shift_requires_contract || event.staff_separately) && (
                     <div
                       style={{
                         fontSize: '13px',
@@ -168,6 +168,7 @@ export default function EventManagement({ onEventsChange }: EventManagementProps
                         <span>👥 {event.shift_max_volunteers} volunteers</span>
                       )}
                       {event.shift_requires_contract && <span>📄 Contract required</span>}
+                      {event.staff_separately && <span>🕘 Separate shift</span>}
                     </div>
                   )}
                 </div>

@@ -83,6 +83,23 @@ pub async fn insert_event(db: &SqlitePool, date: &str, max_volunteers: Option<i3
     .expect("insert event");
 }
 
+/// An event staffed as its own shift, with the given id doubling as its slot key.
+pub async fn insert_separate_event(db: &SqlitePool, id: &str, date: &str, start: &str, end: &str, max_volunteers: Option<i32>) {
+    sqlx::query(
+        "INSERT INTO events (id, title, event_date, start_time, end_time, shift_max_volunteers, staff_separately)
+         VALUES (?, ?, ?, ?, ?, ?, 1)",
+    )
+    .bind(id)
+    .bind(id)
+    .bind(date)
+    .bind(start)
+    .bind(end)
+    .bind(max_volunteers)
+    .execute(db)
+    .await
+    .expect("insert separately-staffed event");
+}
+
 pub fn json_post(uri: &str, body: serde_json::Value, bearer: Option<&str>, kiosk: Option<&str>) -> Request<Body> {
     let mut b = Request::builder()
         .method("POST")
@@ -146,6 +163,16 @@ pub async fn insert_shift_signup(db: &SqlitePool, user_id: &str, date: &str) {
         .execute(db)
         .await
         .expect("insert shift signup");
+}
+
+pub async fn insert_slot_signup(db: &SqlitePool, user_id: &str, date: &str, slot: &str) {
+    sqlx::query("INSERT INTO shift_signups (shift_date, slot, user_id) VALUES (?, ?, ?)")
+        .bind(date)
+        .bind(slot)
+        .bind(user_id)
+        .execute(db)
+        .await
+        .expect("insert slot signup");
 }
 
 /// Build a User with the four onboarding flags set as specified.

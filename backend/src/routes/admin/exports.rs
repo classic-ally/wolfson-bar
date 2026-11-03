@@ -16,6 +16,7 @@ use tracing::{error, info};
 use crate::auth::CommitteeUser;
 use crate::models::{ErrorResponse, IS_ROTA_MEMBER_SQL};
 use crate::routes::auth::AppState;
+use crate::slots::SLOT_TITLE_SQL;
 
 /// RFC 4180 CSV field escaping. Wraps the value in quotes and doubles any
 /// embedded quotes if it contains a comma, quote, or line break.
@@ -117,8 +118,9 @@ struct ShiftHistoryExportRow {
 
 /// Export the full shift signup history as a CSV. Committee-only.
 ///
-/// Columns: shift_date, event_title, display_name, email, checked_in_at. An empty
-/// event_title indicates a regular (non-event) bar night, not a missing event row;
+/// Columns: shift_date, event_title, display_name, email, checked_in_at. On a
+/// night split into separately-staffed events, event_title names the shift the
+/// member was on. An empty event_title indicates a regular (non-event) bar night;
 /// an empty checked_in_at means the member never scanned in at the kiosk (UTC otherwise).
 pub async fn export_shift_history_csv(
     State(state): State<AppState>,
@@ -126,17 +128,16 @@ pub async fn export_shift_history_csv(
 ) -> Result<Response, (StatusCode, Json<ErrorResponse>)> {
     info!("📤 Committee member {} exporting shift history CSV", user.id);
 
-    let rows = sqlx::query_as::<_, ShiftHistoryExportRow>(
-        "SELECT s.shift_date, \
-                COALESCE(e.title, '') AS event_title, \
+    let rows = sqlx::query_as::<_, ShiftHistoryExportRow>(&format!(
+        "SELECT ss.shift_date, \
+                COALESCE({SLOT_TITLE_SQL}, '') AS event_title, \
                 u.display_name, \
                 u.email, \
-                s.checked_in_at \
-         FROM shift_signups s \
-         JOIN users u ON u.id = s.user_id \
-         LEFT JOIN events e ON e.event_date = s.shift_date \
-         ORDER BY s.shift_date DESC, u.display_name ASC",
-    )
+                ss.checked_in_at \
+         FROM shift_signups ss \
+         JOIN users u ON u.id = ss.user_id \
+         ORDER BY ss.shift_date DESC, u.display_name ASC",
+    ))
     .fetch_all(&state.db)
     .await
     .map_err(|e| {

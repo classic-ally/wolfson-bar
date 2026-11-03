@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fillStateFor, offersSupervisedShift } from './ShiftCalendarDay'
+import { fillStateFor, nightFillState, offersSupervisedShift } from './ShiftCalendarDay'
 import type { ViewerContext } from './ShiftSlotCalendar'
 import type { ShiftInfo } from '@/types/ShiftInfo'
 import type { ShiftSignupUser } from '@/types/ShiftSignupUser'
@@ -8,6 +8,7 @@ import type { UserStatus } from '@/types/UserStatus'
 function shift(signups: ShiftSignupUser[], max_volunteers = 4, requires_contract = false): ShiftInfo {
   return {
     date: '2026-06-01',
+    slot: '',
     event_title: null,
     event_description: null,
     max_volunteers,
@@ -101,5 +102,24 @@ describe('supervised shift calendar rules', () => {
       ),
     ).toBe(false)
     expect(offersSupervisedShift(s, { kind: 'manager' }, false)).toBe(false)
+  })
+})
+
+describe('split night calendar rules', () => {
+  // Impact: on a night split into separate shifts, a full early shift must
+  // not hide that the late shift still needs volunteers.
+  // Should: show a split night as open while any of its shifts has room.
+  it('reads as the most bookable of its shifts', () => {
+    const full = shift([volunteer, volunteer], 2)
+    const open = { ...shift([volunteer], 2), slot: 'late' }
+    expect(nightFillState([full, open], viewer(), false)).toBe('partial')
+    expect(nightFillState([full, { ...full, slot: 'late' }], viewer(), false)).toBe('full')
+  })
+
+  // Should: grey out a split night for unsupervised members only when no shift has a committee member.
+  it('blocks a split night only when no shift has a committee member', () => {
+    const late = { ...shift([committee]), slot: 'late' }
+    expect(nightFillState([shift([]), late], unsupervised, false)).toBe('partial')
+    expect(nightFillState([shift([]), { ...shift([]), slot: 'late' }], unsupervised, false)).toBe('blocked')
   })
 })

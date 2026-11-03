@@ -14,6 +14,7 @@ import type { UserStatus } from '@/types/UserStatus'
 function makeShift(overrides: Partial<ShiftInfo> = {}): ShiftInfo {
   return {
     date: '2026-05-09',
+    slot: '',
     event_title: null,
     event_description: null,
     max_volunteers: 4,
@@ -63,19 +64,22 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 function Wrapper(props: {
-  shift: ShiftInfo
+  shift?: ShiftInfo
+  /** All shifts on a split night; overrides `shift`. */
+  shifts?: ShiftInfo[]
   userStatus: UserStatus
   isCommittee?: boolean
 }) {
-  const [shift, setShift] = useState<ShiftInfo | null>(props.shift)
+  const night = props.shifts ?? (props.shift ? [props.shift] : [])
+  const [shifts, setShifts] = useState<ShiftInfo[] | null>(night)
   return (
     <div className="p-8 space-y-2">
-      <Button onClick={() => setShift(props.shift)}>Open Shift Detail</Button>
+      <Button onClick={() => setShifts(night)}>Open Shift Detail</Button>
       <ShiftDetailModal
-        shift={shift}
+        shifts={shifts}
         userStatus={props.userStatus}
         isCommittee={props.isCommittee}
-        onClose={() => setShift(null)}
+        onClose={() => setShifts(null)}
         onUpdate={() => {}}
       />
     </div>
@@ -85,7 +89,7 @@ function Wrapper(props: {
 export const RegularUserCanSignUp: Story = {
   render: () => <Wrapper shift={makeShift()} userStatus={makeUser()} />,
   args: {
-    shift: makeShift(),
+    shifts: [makeShift()],
     userStatus: makeUser(),
     onClose: () => {},
     onUpdate: () => {},
@@ -107,7 +111,7 @@ export const SignedUp: Story = {
     />
   ),
   args: {
-    shift: makeShift(),
+    shifts: [makeShift()],
     userStatus: makeUser(),
     onClose: () => {},
     onUpdate: () => {},
@@ -130,7 +134,7 @@ export const ShiftFull: Story = {
     />
   ),
   args: {
-    shift: makeShift(),
+    shifts: [makeShift()],
     userStatus: makeUser(),
     onClose: () => {},
     onUpdate: () => {},
@@ -145,7 +149,7 @@ export const RequiresContractNoContract: Story = {
     />
   ),
   args: {
-    shift: makeShift(),
+    shifts: [makeShift()],
     userStatus: makeUser(),
     onClose: () => {},
     onUpdate: () => {},
@@ -163,7 +167,7 @@ export const WithEvent: Story = {
     />
   ),
   args: {
-    shift: makeShift(),
+    shifts: [makeShift()],
     userStatus: makeUser(),
     onClose: () => {},
     onUpdate: () => {},
@@ -184,7 +188,7 @@ export const NeedsInductionWithAvailability: Story = {
     />
   ),
   args: {
-    shift: makeShift(),
+    shifts: [makeShift()],
     userStatus: makeUser(),
     onClose: () => {},
     onUpdate: () => {},
@@ -199,7 +203,7 @@ export const NeedsSupervisedShift: Story = {
     />
   ),
   args: {
-    shift: makeShift(),
+    shifts: [makeShift()],
     userStatus: makeUser(),
     onClose: () => {},
     onUpdate: () => {},
@@ -220,7 +224,7 @@ export const SupervisedShiftAvailable: Story = {
     />
   ),
   args: {
-    shift: makeShift(),
+    shifts: [makeShift()],
     userStatus: makeUser(),
     onClose: () => {},
     onUpdate: () => {},
@@ -257,7 +261,7 @@ export const CommitteeAssignSelectsMember: Story = {
     />
   ),
   args: {
-    shift: makeShift(),
+    shifts: [makeShift()],
     userStatus: makeUser({ is_committee: true }),
     isCommittee: true,
     onClose: () => {},
@@ -298,10 +302,52 @@ export const CommitteeView: Story = {
     />
   ),
   args: {
-    shift: makeShift(),
+    shifts: [makeShift()],
     userStatus: makeUser({ is_committee: true }),
     isCommittee: true,
     onClose: () => {},
     onUpdate: () => {},
+  },
+}
+
+export const SplitNight: Story = {
+  render: () => (
+    <Wrapper
+      shifts={[
+        makeShift({
+          slot: 'evt-early',
+          event_title: 'Charity pre-drinks',
+          open_time: '18:30',
+          close_time: '21:00',
+          max_volunteers: 2,
+          signups_count: 1,
+          signups: [{ user_id: 'u-committee', display_name: 'Committee Member', is_committee: true }],
+        }),
+        makeShift({
+          slot: 'evt-late',
+          event_title: 'Charity party',
+          open_time: '21:00',
+          close_time: '02:00',
+          max_volunteers: 4,
+          signups_count: 0,
+          signups: [],
+        }),
+      ]}
+      userStatus={makeUser()}
+    />
+  ),
+  args: {
+    shifts: [makeShift()],
+    userStatus: makeUser(),
+    onClose: () => {},
+    onUpdate: () => {},
+  },
+  play: async () => {
+    // The dialog opens on load and is portaled to document.body.
+    const body = within(document.body)
+    await body.findByText('Charity pre-drinks')
+    expect(body.getByText('Charity party')).toBeInTheDocument()
+    expect(body.getAllByRole('button', { name: 'Sign Up' })).toHaveLength(2)
+    expect(body.getByRole('button', { name: 'Whole night' })).toBeEnabled()
   },
 }

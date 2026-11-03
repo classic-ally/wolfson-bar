@@ -63,6 +63,20 @@ export function offersSupervisedShift(
   return (state === 'empty' || state === 'partial') && shift.signups.some((s) => s.is_committee)
 }
 
+/** Most bookable state across a night's shifts, so a split night reads as
+ *  open while any of its shifts still has room. */
+const nightPriority: FillState[] = ['empty', 'partial', 'blocked', 'full', 'unknown']
+
+export function nightFillState(
+  shifts: ShiftInfo[],
+  viewer: ViewerContext,
+  isPast: boolean,
+): FillState {
+  if (shifts.length === 0) return fillStateFor(undefined, viewer, isPast)
+  const states = shifts.map((s) => fillStateFor(s, viewer, isPast))
+  return nightPriority.find((p) => states.includes(p)) ?? 'unknown'
+}
+
 const fillStyles: Record<FillState, string> = {
   empty: 'bg-red-100 hover:bg-red-200 text-red-900',
   partial: 'bg-amber-100 hover:bg-amber-200 text-amber-900',
@@ -78,8 +92,9 @@ export interface ShiftCalendarDayProps {
   day: DayPickerDayButtonProps['day']
   modifiers: DayPickerDayButtonProps['modifiers']
   buttonProps: Omit<DayPickerDayButtonProps, 'day' | 'modifiers'>
-  /** Resolved per-date data (looked up by the parent calendar). */
-  shift: ShiftInfo | undefined
+  /** Resolved per-date data (looked up by the parent calendar). Several
+   *  shifts when the night's events are staffed separately. */
+  shifts: ShiftInfo[]
   events: Event[]
   termLabel: string | undefined
   inductionDate: InductionDate | undefined
@@ -134,7 +149,7 @@ export default function ShiftCalendarDay({
   day,
   modifiers,
   buttonProps,
-  shift,
+  shifts,
   events,
   termLabel,
   inductionDate,
@@ -147,12 +162,19 @@ export default function ShiftCalendarDay({
   const cellDate = new Date(day.date)
   cellDate.setHours(0, 0, 0, 0)
   const isPast = cellDate < today
-  const state = fillStateFor(shift, viewerContext, isPast)
+  // Night-level fields (induction) are the same on every shift of the night.
+  const shift = shifts[0] as ShiftInfo | undefined
+  const state = nightFillState(shifts, viewerContext, isPast)
   const isFull = state === 'full'
   const isBlocked = state === 'blocked'
   const disabled = modifiers.disabled || isFull || isBlocked
   const isPublic = viewerContext.kind === 'public'
-  const showSupervised = offersSupervisedShift(shift, viewerContext, isPast)
+  const showSupervised = shifts.some((s) => offersSupervisedShift(s, viewerContext, isPast))
+  const signupsCount = shifts.reduce((n, s) => n + s.signups_count, 0)
+  const maxVolunteers = shifts.reduce((n, s) => n + s.max_volunteers, 0)
+  const splitTitle = `${shifts.length} separate shifts: ${shifts
+    .map((s) => s.event_title || 'Regular opening')
+    .join(', ')}`
   const supervisedTitle = 'Committee member on shift: book this as your supervised shift'
 
   const isOwnInduction = !!shift?.current_user_induction_available
@@ -199,7 +221,16 @@ export default function ShiftCalendarDay({
           {format(day.date, 'd')}
         </span>
         <div className="flex items-center gap-0.5">
-          {!isPublic && shift?.requires_contract && (
+          {!isPublic && shifts.length > 1 && (
+            <span
+              className="rounded bg-slate-600 px-1 text-[9px] font-bold leading-[14px] text-white"
+              title={splitTitle}
+              aria-label={splitTitle}
+            >
+              {shifts.length}×
+            </span>
+          )}
+          {!isPublic && shifts.some((s) => s.requires_contract) && (
             <span
               className="rounded bg-amber-500 px-1 text-[9px] font-bold leading-[14px] text-white"
               title="Paid event — contract required"
@@ -240,8 +271,8 @@ export default function ShiftCalendarDay({
       </div>
       {!isPublic && shift && (
         <span className="text-[9px] sm:text-[10px] leading-tight font-medium">
-          {shift.signups_count}/{shift.max_volunteers}
-          {shift.signups.some((s) => s.needs_coc) && (
+          {signupsCount}/{maxVolunteers}
+          {shifts.some((sh) => sh.signups.some((s) => s.needs_coc)) && (
             // inline-block stops a full day's line-through from striking the marker out.
             <span
               className="ml-1 inline-block text-xs font-extrabold text-amber-600 no-underline"

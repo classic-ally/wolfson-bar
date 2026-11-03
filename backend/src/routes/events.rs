@@ -3,12 +3,14 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tracing::{info, error};
 use uuid::Uuid;
 
+use crate::auth::CommitteeUser;
 use crate::models::{ErrorResponse, Event};
 use crate::routes::auth::AppState;
+use crate::slots::merge_into_regular;
 
 #[derive(Debug, Deserialize)]
 pub struct EventsQuery {
@@ -25,6 +27,7 @@ pub struct CreateEventRequest {
     pub end_time: Option<String>,
     pub shift_max_volunteers: Option<i32>,
     pub shift_requires_contract: Option<bool>,
+    pub staff_separately: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -36,6 +39,7 @@ pub struct UpdateEventRequest {
     pub end_time: Option<String>,
     pub shift_max_volunteers: Option<i32>,
     pub shift_requires_contract: Option<bool>,
+    pub staff_separately: Option<bool>,
 }
 
 // Get events (public endpoint)
@@ -126,67 +130,53 @@ pub async fn get_event(
     Ok(Json(event))
 }
 
-// Create event (committee only - validation done in main.rs middleware or here)
-pub async fn create_event(
-    State(state): State<AppState>,
-    Json(req): Json<CreateEventRequest>,
-) -> Result<Json<Event>, (StatusCode, Json<ErrorResponse>)> {
-    info!("➕ Creating event: {}", req.title);
-
-    // Validate date format (basic check)
-    if req.event_date.len() != 10 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "Invalid date format. Use YYYY-MM-DD".to_string(),
-            }),
-        ));
+/// Check an event's date and times. A separately-staffed event needs both
+/// times, since they define its shift.
+fn validate_event(event: &Event) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    fn bad(error: &str) -> (StatusCode, Json<ErrorResponse>) {
+        (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: error.to_string() }))
     }
-
-    // Validate time format if provided (HH:MM)
     fn valid_time(t: &str) -> bool {
         t.len() == 5 && t.as_bytes()[2] == b':' &&
         t[..2].parse::<u8>().map_or(false, |h| h < 24) &&
         t[3..].parse::<u8>().map_or(false, |m| m < 60)
     }
-    if let Some(ref t) = req.start_time {
-        if !valid_time(t) {
-            return Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Invalid start_time format. Use HH:MM".to_string() })));
-        }
-    }
-    if let Some(ref t) = req.end_time {
-        if !valid_time(t) {
-            return Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Invalid end_time format. Use HH:MM".to_string() })));
-        }
-    }
 
-    let event_id = Uuid::new_v4().to_string();
+    if chrono::NaiveDate::parse_from_str(&event.event_date, "%Y-%m-%d").is_err() {
+        return Err(bad("Invalid date format. Use YYYY-MM-DD"));
+    }
+    if event.start_time.as_deref().is_some_and(|t| !valid_time(t)) {
+        return Err(bad("Invalid start_time format. Use HH:MM"));
+    }
+    if event.end_time.as_deref().is_some_and(|t| !valid_time(t)) {
+        return Err(bad("Invalid end_time format. Use HH:MM"));
+    }
+    if event.staff_separately && (event.start_time.is_none() || event.end_time.is_none()) {
+        return Err(bad("An event staffed as a separate shift needs a start and end time"));
+    }
+    Ok(())
+}
 
-    sqlx::query(
-        "INSERT INTO events (id, title, description, event_date, start_time, end_time, shift_max_volunteers, shift_requires_contract) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+fn internal(context: &str, e: sqlx::Error) -> (StatusCode, Json<ErrorResponse>) {
+    error!("❌ {}: {}", context, e);
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ErrorResponse {
+            error: context.to_string(),
+        }),
     )
-    .bind(&event_id)
-    .bind(&req.title)
-    .bind(&req.description)
-    .bind(&req.event_date)
-    .bind(&req.start_time)
-    .bind(&req.end_time)
-    .bind(&req.shift_max_volunteers)
-    .bind(&req.shift_requires_contract)
-    .execute(&state.db)
-    .await
-    .map_err(|e| {
-        error!("❌ Failed to create event: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: "Failed to create event".to_string(),
-            }),
-        )
-    })?;
+}
+
+// Create event (committee only)
+pub async fn create_event(
+    State(state): State<AppState>,
+    CommitteeUser(_): CommitteeUser,
+    Json(req): Json<CreateEventRequest>,
+) -> Result<Json<Event>, (StatusCode, Json<ErrorResponse>)> {
+    info!("➕ Creating event: {}", req.title);
 
     let event = Event {
-        id: event_id,
+        id: Uuid::new_v4().to_string(),
         title: req.title,
         description: req.description,
         event_date: req.event_date,
@@ -194,7 +184,25 @@ pub async fn create_event(
         end_time: req.end_time,
         shift_max_volunteers: req.shift_max_volunteers,
         shift_requires_contract: req.shift_requires_contract,
+        staff_separately: req.staff_separately.unwrap_or(false),
     };
+    validate_event(&event)?;
+
+    sqlx::query(
+        "INSERT INTO events (id, title, description, event_date, start_time, end_time, shift_max_volunteers, shift_requires_contract, staff_separately) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+    .bind(&event.id)
+    .bind(&event.title)
+    .bind(&event.description)
+    .bind(&event.event_date)
+    .bind(&event.start_time)
+    .bind(&event.end_time)
+    .bind(event.shift_max_volunteers)
+    .bind(event.shift_requires_contract)
+    .bind(event.staff_separately)
+    .execute(&state.db)
+    .await
+    .map_err(|e| internal("Failed to create event", e))?;
 
     info!("✅ Event created: {}", event.id);
 
@@ -204,18 +212,21 @@ pub async fn create_event(
 // Update event (committee only)
 pub async fn update_event(
     State(state): State<AppState>,
+    CommitteeUser(_): CommitteeUser,
     Path(event_id): Path<String>,
     Json(req): Json<UpdateEventRequest>,
 ) -> Result<Json<Event>, (StatusCode, Json<ErrorResponse>)> {
     info!("✏️ Updating event: {}", event_id);
 
+    let mut tx = state.db.begin().await.map_err(|e| internal("Failed to update event", e))?;
+
     // Get existing event
     let mut event = sqlx::query_as::<_, Event>("SELECT * FROM events WHERE id = ?")
         .bind(&event_id)
-        .fetch_one(&state.db)
+        .fetch_optional(&mut *tx)
         .await
-        .map_err(|e| {
-            error!("❌ Event not found: {}", e);
+        .map_err(|e| internal("Failed to fetch event", e))?
+        .ok_or_else(|| {
             (
                 StatusCode::NOT_FOUND,
                 Json(ErrorResponse {
@@ -223,6 +234,7 @@ pub async fn update_event(
                 }),
             )
         })?;
+    let was_separate_on = event.staff_separately.then(|| event.event_date.clone());
 
     // Update fields if provided
     if let Some(title) = req.title {
@@ -243,29 +255,36 @@ pub async fn update_event(
     if req.shift_requires_contract.is_some() {
         event.shift_requires_contract = req.shift_requires_contract;
     }
+    if let Some(staff_separately) = req.staff_separately {
+        event.staff_separately = staff_separately;
+    }
+    validate_event(&event)?;
+
+    // Bookings on the event's own shift belong to the night it was on; once it
+    // stops being that shift, they fall back to that night's regular shift.
+    if was_separate_on.is_some_and(|date| !event.staff_separately || date != event.event_date) {
+        merge_into_regular(&mut tx, &event_id)
+            .await
+            .map_err(|e| internal("Failed to move shift signups", e))?;
+    }
 
     sqlx::query(
-        "UPDATE events SET title = ?, description = ?, event_date = ?, start_time = ?, end_time = ?, shift_max_volunteers = ?, shift_requires_contract = ? WHERE id = ?"
+        "UPDATE events SET title = ?, description = ?, event_date = ?, start_time = ?, end_time = ?, shift_max_volunteers = ?, shift_requires_contract = ?, staff_separately = ? WHERE id = ?"
     )
     .bind(&event.title)
     .bind(&event.description)
     .bind(&event.event_date)
     .bind(&event.start_time)
     .bind(&event.end_time)
-    .bind(&event.shift_max_volunteers)
-    .bind(&event.shift_requires_contract)
+    .bind(event.shift_max_volunteers)
+    .bind(event.shift_requires_contract)
+    .bind(event.staff_separately)
     .bind(&event_id)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await
-    .map_err(|e| {
-        error!("❌ Failed to update event: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: "Failed to update event".to_string(),
-            }),
-        )
-    })?;
+    .map_err(|e| internal("Failed to update event", e))?;
+
+    tx.commit().await.map_err(|e| internal("Failed to update event", e))?;
 
     info!("✅ Event updated: {}", event_id);
 
@@ -275,25 +294,148 @@ pub async fn update_event(
 // Delete event (committee only)
 pub async fn delete_event(
     State(state): State<AppState>,
+    CommitteeUser(_): CommitteeUser,
     Path(event_id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
     info!("🗑️ Deleting event: {}", event_id);
 
+    let mut tx = state.db.begin().await.map_err(|e| internal("Failed to delete event", e))?;
+
+    merge_into_regular(&mut tx, &event_id)
+        .await
+        .map_err(|e| internal("Failed to move shift signups", e))?;
+
     sqlx::query("DELETE FROM events WHERE id = ?")
         .bind(&event_id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await
-        .map_err(|e| {
-            error!("❌ Failed to delete event: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: "Failed to delete event".to_string(),
-                }),
-            )
-        })?;
+        .map_err(|e| internal("Failed to delete event", e))?;
+
+    tx.commit().await.map_err(|e| internal("Failed to delete event", e))?;
 
     info!("✅ Event deleted: {}", event_id);
 
     Ok(StatusCode::OK)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_util::{
+        insert_separate_event, insert_slot_signup, insert_user, json_post, test_state, token_for, user_with,
+        user_with_role,
+    };
+    use axum::routing::post;
+    use axum::Router;
+    use tower::ServiceExt;
+
+    const NIGHT: &str = "2026-06-19";
+
+    async fn slots_of(state: &AppState) -> Vec<(String, String)> {
+        sqlx::query_as("SELECT slot, user_id FROM shift_signups WHERE shift_date = ? ORDER BY slot, user_id")
+            .bind(NIGHT)
+            .fetch_all(&state.db)
+            .await
+            .unwrap()
+    }
+
+    fn unflag() -> UpdateEventRequest {
+        UpdateEventRequest {
+            title: None,
+            description: None,
+            event_date: None,
+            start_time: Some("18:30".to_string()),
+            end_time: Some("21:00".to_string()),
+            shift_max_volunteers: None,
+            shift_requires_contract: None,
+            staff_separately: Some(false),
+        }
+    }
+
+    // Impact: event routes had no auth check, so anyone could create, edit or
+    // delete events and now reshape the rota.
+    // Should: refuse event creation from members who aren't on the committee.
+    #[tokio::test]
+    async fn non_committee_cannot_create_events() {
+        let state = test_state().await;
+        let member = user_with_role(false, false);
+        insert_user(&state.db, &member).await;
+        let app = Router::new().route("/api/admin/events", post(create_event)).with_state(state.clone());
+
+        let res = app
+            .oneshot(json_post(
+                "/api/admin/events",
+                serde_json::json!({ "title": "Party", "event_date": NIGHT }),
+                Some(&token_for(&state, &member)),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    }
+
+    // Should: refuse a separately-staffed event without start and end times.
+    #[tokio::test]
+    async fn separate_shift_needs_times() {
+        let state = test_state().await;
+        let committee = user_with_role(true, false);
+        let req = CreateEventRequest {
+            title: "Party".to_string(),
+            description: None,
+            event_date: NIGHT.to_string(),
+            start_time: Some("21:00".to_string()),
+            end_time: None,
+            shift_max_volunteers: None,
+            shift_requires_contract: None,
+            staff_separately: Some(true),
+        };
+        let (status, _) = create_event(State(state), CommitteeUser(committee), Json(req))
+            .await
+            .expect_err("missing end time");
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    // Impact: unflagging must not silently drop members' bookings for that night.
+    // Should: move bookings on an unflagged event's shift onto the night's regular shift.
+    // Should not: double-book a member who was already on the regular shift.
+    #[tokio::test]
+    async fn unflagging_moves_bookings_to_the_regular_shift() {
+        let state = test_state().await;
+        insert_separate_event(&state.db, "early", NIGHT, "18:30", "21:00", None).await;
+        let (a, b) = (user_with(true, true, true, true), user_with(true, true, true, true));
+        insert_user(&state.db, &a).await;
+        insert_user(&state.db, &b).await;
+        insert_slot_signup(&state.db, &a.id, NIGHT, "early").await;
+        insert_slot_signup(&state.db, &b.id, NIGHT, "early").await;
+        insert_slot_signup(&state.db, &b.id, NIGHT, "").await;
+
+        let _ = update_event(
+            State(state.clone()),
+            CommitteeUser(user_with_role(true, false)),
+            Path("early".to_string()),
+            Json(unflag()),
+        )
+        .await
+        .unwrap();
+
+        let mut expected = vec![(String::new(), a.id.clone()), (String::new(), b.id.clone())];
+        expected.sort();
+        assert_eq!(slots_of(&state).await, expected);
+    }
+
+    // Should: move bookings onto the regular shift when a separately-staffed event is deleted.
+    #[tokio::test]
+    async fn deleting_moves_bookings_to_the_regular_shift() {
+        let state = test_state().await;
+        insert_separate_event(&state.db, "early", NIGHT, "18:30", "21:00", None).await;
+        let member = user_with(true, true, true, true);
+        insert_user(&state.db, &member).await;
+        insert_slot_signup(&state.db, &member.id, NIGHT, "early").await;
+
+        delete_event(State(state.clone()), CommitteeUser(user_with_role(true, false)), Path("early".to_string()))
+            .await
+            .unwrap();
+
+        assert_eq!(slots_of(&state).await, [(String::new(), member.id.clone())]);
+    }
 }

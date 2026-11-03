@@ -62,6 +62,9 @@ export default function CheckInPage() {
         {state === 'success' && result && (
           <>
             <h2 style={{ color: '#198754' }}>✅ You're checked in!</h2>
+            {result.slot_title && (
+              <p style={{ fontWeight: 600 }}>{result.slot_title}</p>
+            )}
             <p style={{ color: '#666' }}>
               {result.was_signed_up
                 ? 'Thanks for taking your shift.'

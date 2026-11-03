@@ -184,6 +184,10 @@ function CalendarLegendPopup({ userStatus }: { userStatus: UserStatus }) {
             <p className="text-xs text-muted-foreground">
               🔴 Red = no volunteers · 🟡 Amber = needs more · Grey + strikethrough = full
             </p>
+            <p className="text-xs text-muted-foreground">
+              Dates marked <strong>2×</strong> have separate shifts (e.g. an early
+              event and the late bar); sign up for either or the whole night.
+            </p>
             {!userStatus.supervised_shift_completed && (
               <p className="text-xs text-muted-foreground">
                 Your first shift must be supervised by a committee member. Dates
@@ -204,12 +208,13 @@ function EventsPage() {
   const [termWeeks, setTermWeeks] = useState<TermWeek[]>([])
   const [inductionDates, setInductionDates] = useState<InductionDate[]>([])
   const [eventsLoading, setEventsLoading] = useState(false)
-  const [selectedShift, setSelectedShift] = useState<ShiftInfo | null>(null)
+  // Shifts on the night open in the modal; more than one on a split night.
+  const [selectedShifts, setSelectedShifts] = useState<ShiftInfo[] | null>(null)
   const [userStatus, setUserStatus] = useState<UserStatus | null>(null)
   // Cell-selection visual = whatever the modal is currently on. Single source
   // of truth — no risk of the highlight outliving the modal close.
-  const selectedDate = selectedShift
-    ? new Date(selectedShift.date + 'T00:00:00')
+  const selectedDate = selectedShifts
+    ? new Date(selectedShifts[0].date + 'T00:00:00')
     : undefined
   usePageTitle('Events Calendar')
 
@@ -234,12 +239,12 @@ function EventsPage() {
     }
   }, [])
 
-  // Keep selectedShift in sync when shifts data refreshes
+  // Keep selectedShifts in sync when shifts data refreshes
   useEffect(() => {
-    if (selectedShift) {
-      const updated = shifts.find(s => s.date === selectedShift.date)
-      if (updated) {
-        setSelectedShift(updated)
+    if (selectedShifts) {
+      const updated = shifts.filter(s => s.date === selectedShifts[0].date)
+      if (updated.length > 0) {
+        setSelectedShifts(updated)
       }
     }
   }, [shifts])
@@ -299,15 +304,16 @@ function EventsPage() {
     const day = String(date.getDate()).padStart(2, '0')
     const dateStr = `${year}-${month}-${day}`
 
-    // Find shift for this date
-    const shift = shifts.find(s => s.date === dateStr)
-    if (shift) {
-      setSelectedShift(shift)
+    // Find the shifts on this date
+    const night = shifts.filter(s => s.date === dateStr)
+    if (night.length > 0) {
+      setSelectedShifts(night)
     } else if (userStatus && !userStatus.induction_completed) {
       // For pre-induction users, create a minimal ShiftInfo so the modal can show induction signup
       const inductionDate = inductionDates.find(d => d.date === dateStr)
-      setSelectedShift({
+      setSelectedShifts([{
         date: dateStr,
+        slot: '',
         event_title: null,
         event_description: null,
         max_volunteers: 0,
@@ -319,12 +325,12 @@ function EventsPage() {
         has_induction_availability: !!inductionDate,
         induction_signups_count: inductionDate ? (4 - inductionDate.slots_remaining) : 0,
         current_user_induction_available: false,
-      })
+      }])
     }
   }
 
   const handleCloseModal = () => {
-    setSelectedShift(null)
+    setSelectedShifts(null)
   }
 
   const handleShiftUpdate = () => {
@@ -371,8 +377,8 @@ function EventsPage() {
       )}
 
       <ShiftDetailModal
-        shift={selectedShift}
-        event={selectedShift ? events.find(e => e.event_date === selectedShift.date) : null}
+        shifts={selectedShifts}
+        events={selectedShifts ? events.filter(e => e.event_date === selectedShifts[0].date) : []}
         userStatus={userStatus}
         isCommittee={isCommittee()}
         onClose={handleCloseModal}

@@ -16,6 +16,7 @@ import type { VerificationToken } from '../types/VerificationToken'
 import type { PendingContract } from '../types/PendingContract'
 import type { Event } from '../types/Event'
 import type { ShiftInfo } from '../types/ShiftInfo'
+import type { WholeNightSignup } from '../types/WholeNightSignup'
 import type { UserShift } from '../types/UserShift'
 import type { BarHours } from '../types/BarHours'
 import type { OverviewStats } from '../types/OverviewStats'
@@ -629,11 +630,17 @@ export async function getShifts(startDate: string, endDate: string): Promise<Shi
   return response.json()
 }
 
+/** Query string selecting one of a night's shifts; the regular shift needs none. */
+function slotQuery(slot: string): string {
+  return slot ? `?${new URLSearchParams({ slot }).toString()}` : ''
+}
+
 /**
- * Sign up for a shift (authenticated)
+ * Sign up for a shift (authenticated). `slot` picks one of a split night's
+ * shifts; omit it for the regular shift.
  */
-export async function signupForShift(date: string): Promise<void> {
-  const response = await authenticatedFetch(`${API_BASE}/api/shifts/${date}/signup`, {
+export async function signupForShift(date: string, slot = ''): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/shifts/${date}/signup${slotQuery(slot)}`, {
     method: 'POST',
   })
 
@@ -644,10 +651,26 @@ export async function signupForShift(date: string): Promise<void> {
 }
 
 /**
+ * Sign up for every shift on a night that has room (authenticated)
+ */
+export async function signupForWholeNight(date: string): Promise<WholeNightSignup> {
+  const response = await authenticatedFetch(`${API_BASE}/api/shifts/${date}/signup-all`, {
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to sign up for the night')
+  }
+
+  return response.json()
+}
+
+/**
  * Assign a user to a shift (committee only)
  */
-export async function assignUserToShift(date: string, userId: string): Promise<void> {
-  const response = await authenticatedFetch(`${API_BASE}/api/admin/shifts/${date}/${userId}`, {
+export async function assignUserToShift(date: string, userId: string, slot = ''): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/shifts/${date}/${userId}${slotQuery(slot)}`, {
     method: 'POST',
   })
 
@@ -660,8 +683,8 @@ export async function assignUserToShift(date: string, userId: string): Promise<v
 /**
  * Remove a user from a shift (committee only)
  */
-export async function removeUserFromShift(date: string, userId: string): Promise<void> {
-  const response = await authenticatedFetch(`${API_BASE}/api/admin/shifts/${date}/${userId}`, {
+export async function removeUserFromShift(date: string, userId: string, slot = ''): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/admin/shifts/${date}/${userId}${slotQuery(slot)}`, {
     method: 'DELETE',
   })
 
@@ -674,8 +697,8 @@ export async function removeUserFromShift(date: string, userId: string): Promise
 /**
  * Cancel shift signup (authenticated)
  */
-export async function cancelShiftSignup(date: string): Promise<void> {
-  const response = await authenticatedFetch(`${API_BASE}/api/shifts/${date}/signup`, {
+export async function cancelShiftSignup(date: string, slot = ''): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE}/api/shifts/${date}/signup${slotQuery(slot)}`, {
     method: 'DELETE',
   })
 

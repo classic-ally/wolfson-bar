@@ -136,6 +136,9 @@ def wipe_dummies(con: sqlite3.Connection) -> None:
     # FK CASCADE on user_id wipes shift_signups, induction_availability,
     # induction_signups, magic-link-state. Events have no FK to users so we
     # delete them by id prefix.
+    # Re-running 009 in ensure_schema leaves foreign keys off, so the cascade
+    # can't be relied on for signups; clear them explicitly.
+    cur.execute("DELETE FROM shift_signups WHERE user_id LIKE ?", (DUMMY_PREFIX + "%",))
     cur.execute("DELETE FROM users WHERE id LIKE ?", (DUMMY_PREFIX + "%",))
     cur.execute("DELETE FROM events WHERE id LIKE ?", (DUMMY_PREFIX + "%",))
     cur.execute("DELETE FROM magic_link_tokens WHERE token LIKE ?", (DUMMY_PREFIX + "%",))
@@ -208,6 +211,30 @@ def seed_events(con: sqlite3.Connection) -> list[dict]:
         )
         events.append({"id": eid, "date": ev_date, "paid": paid,
                        "max": max_vols or 2})
+
+    # A Friday split into two separately-staffed shifts, to show the per-shift
+    # sign-up in the calendar's day window.
+    taken = {e["date"] for e in events}
+    split = today + timedelta(days=10)
+    while split.weekday() != 4 or split.isoformat() in taken:
+        split += timedelta(days=1)
+    for suffix, title, start, end in (
+        ("early", "Charity pre-drinks", "18:30", "21:00"),
+        ("late", "Charity party", "21:00", "02:00"),
+    ):
+        cur.execute(
+            """
+            INSERT INTO events (
+                id, title, description, event_date, start_time, end_time,
+                shift_max_volunteers, staff_separately
+            ) VALUES (?, ?, ?, ?, ?, ?, 3, 1)
+            """,
+            (f"{DUMMY_PREFIX}split-{suffix}", title,
+             "Staffed as its own shift.", split.isoformat(), start, end),
+        )
+        events.append({"id": f"{DUMMY_PREFIX}split-{suffix}",
+                       "date": split.isoformat(), "paid": False, "max": 3,
+                       "slot": f"{DUMMY_PREFIX}split-{suffix}"})
     con.commit()
     return events
 
@@ -225,7 +252,8 @@ def seed_shift_signups(
     bookable = [m for m in members if m["supervised"]]
     contracted = [m for m in members if m["has_contract"] and m["supervised"]]
 
-    by_date = {e["date"]: e for e in events}
+    by_date = {e["date"]: e for e in events if "slot" not in e}
+    split_dates = {e["date"] for e in events if "slot" in e}
 
     def choose_fill_state() -> str:
         r = random.random()
@@ -238,6 +266,8 @@ def seed_shift_signups(
 
     for day_offset in range(-7, 56):
         d = today + timedelta(days=day_offset)
+        if d.isoformat() in split_dates:
+            continue
         ev = by_date.get(d.isoformat())
         max_vols = ev["max"] if ev else 2
         # Only contracted members can sign up for paid shifts.
@@ -256,6 +286,16 @@ def seed_shift_signups(
                 "INSERT OR IGNORE INTO shift_signups (shift_date, user_id) VALUES (?, ?)",
                 (d.isoformat(), m["id"]),
             )
+
+    # Split night: a committee member on the early shift (so it shows the
+    # supervised-shift S) and the late shift left open.
+    committee = [m for m in members if m["is_committee"]]
+    early = next((e for e in events if e.get("slot", "").endswith("split-early")), None)
+    if committee and early:
+        cur.execute(
+            "INSERT OR IGNORE INTO shift_signups (shift_date, slot, user_id) VALUES (?, ?, ?)",
+            (early["date"], early["slot"], committee[0]["id"]),
+        )
     con.commit()
 
 
@@ -328,13 +368,14 @@ def main() -> int:
         seed_events(con)
         # Build a thin event dict list for the signup planner.
         rows = con.execute(
-            "SELECT id, event_date, shift_requires_contract, shift_max_volunteers "
-            "FROM events WHERE id LIKE ?",
+            "SELECT id, event_date, shift_requires_contract, shift_max_volunteers, "
+            "staff_separately FROM events WHERE id LIKE ?",
             (DUMMY_PREFIX + "%",),
         ).fetchall()
         events = [
             {"id": r[0], "date": r[1], "paid": bool(r[2]),
-             "max": (r[3] if r[3] is not None else 2)}
+             "max": (r[3] if r[3] is not None else 2),
+             **({"slot": r[0]} if r[4] else {})}
             for r in rows
         ]
         seed_shift_signups(con, members, events)

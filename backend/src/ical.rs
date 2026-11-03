@@ -100,7 +100,12 @@ pub fn create_cancel_ical(params: &ShiftIcalParams) -> Result<String, String> {
     Ok(cal_str)
 }
 
-/// Generate a deterministic UID for a shift
-pub fn shift_uid(user_id: &str, shift_date: &str) -> String {
-    format!("wolfson-bar-shift-{}-{}", user_id, shift_date)
+/// Generate a deterministic UID for a shift. The regular shift keeps the
+/// date-only form so calendars that already imported it still match.
+pub fn shift_uid(user_id: &str, shift_date: &str, slot: &str) -> String {
+    if slot.is_empty() {
+        format!("wolfson-bar-shift-{}-{}", user_id, shift_date)
+    } else {
+        format!("wolfson-bar-shift-{}-{}-{}", user_id, shift_date, slot)
+    }
 }

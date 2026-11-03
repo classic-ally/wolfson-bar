@@ -15,6 +15,7 @@ const toDate = new Date('2026-05-31')
 function shift(date: string, signups: number, max = 4): ShiftInfo {
   return {
     date,
+    slot: '',
     event_title: null,
     event_description: null,
     max_volunteers: max,
@@ -95,6 +96,7 @@ const fixtureEvents: Event[] = [
     end_time: '22:00',
     shift_max_volunteers: null,
     shift_requires_contract: null,
+    staff_separately: false,
   },
   {
     id: 'e2',
@@ -105,6 +107,7 @@ const fixtureEvents: Event[] = [
     end_time: '23:00',
     shift_max_volunteers: null,
     shift_requires_contract: null,
+    staff_separately: false,
   },
   {
     id: 'e3',
@@ -115,6 +118,7 @@ const fixtureEvents: Event[] = [
     end_time: '23:30',
     shift_max_volunteers: null,
     shift_requires_contract: null,
+    staff_separately: false,
   },
 ]
 

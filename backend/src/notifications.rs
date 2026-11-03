@@ -4,6 +4,7 @@ use tracing::{info, error};
 
 use crate::email::{EmailAttachment, EmailService};
 use crate::ical::{self, ShiftIcalParams};
+use crate::slots::{shift_times, SLOT_TITLE_SQL};
 
 #[derive(Debug, sqlx::FromRow)]
 struct NotifiableUser {
@@ -12,14 +13,9 @@ struct NotifiableUser {
 }
 
 #[derive(Debug, sqlx::FromRow)]
-struct BarHours {
-    open_time: String,
-    close_time: String,
-}
-
-#[derive(Debug, sqlx::FromRow)]
 struct NotificationLogEntry {
     shift_date: String,
+    slot: String,
     notification_type: String,
 }
 
@@ -120,12 +116,11 @@ async fn process_user_notifications(
     user: &NotifiableUser,
 ) -> Result<(), String> {
     // Get current future signups
-    let current_signups: Vec<(String, Option<String>)> = sqlx::query_as(
-        "SELECT s.shift_date,
-                (SELECT title FROM events WHERE event_date = s.shift_date) as event_title
-         FROM shift_signups s
-         WHERE s.user_id = ? AND s.shift_date >= date('now')"
-    )
+    let current_signups: Vec<(String, String, Option<String>)> = sqlx::query_as(&format!(
+        "SELECT ss.shift_date, ss.slot, {SLOT_TITLE_SQL} as event_title
+         FROM shift_signups ss
+         WHERE ss.user_id = ? AND ss.shift_date >= date('now')"
+    ))
     .bind(&user.id)
     .fetch_all(db)
     .await
@@ -133,7 +128,7 @@ async fn process_user_notifications(
 
     // Get notification log
     let log_entries: Vec<NotificationLogEntry> = sqlx::query_as(
-        "SELECT shift_date, notification_type FROM email_notification_log
+        "SELECT shift_date, slot, notification_type FROM email_notification_log
          WHERE user_id = ? AND shift_date >= date('now')"
     )
     .bind(&user.id)
@@ -141,19 +136,20 @@ async fn process_user_notifications(
     .await
     .map_err(|e| format!("Failed to fetch notification log: {}", e))?;
 
-    let signup_dates: std::collections::HashSet<&str> = current_signups
+    // Keyed by (date, slot): a member can hold more than one shift on a split night.
+    let signed_up: std::collections::HashSet<(&str, &str)> = current_signups
         .iter()
-        .map(|(d, _)| d.as_str())
+        .map(|(d, slot, _)| (d.as_str(), slot.as_str()))
         .collect();
 
-    let log_map: std::collections::HashMap<&str, &str> = log_entries
+    let log_map: std::collections::HashMap<(&str, &str), &str> = log_entries
         .iter()
-        .map(|e| (e.shift_date.as_str(), e.notification_type.as_str()))
+        .map(|e| ((e.shift_date.as_str(), e.slot.as_str()), e.notification_type.as_str()))
         .collect();
 
     // Find shifts that need "added" notifications
-    for (shift_date, event_title) in &current_signups {
-        let needs_notification = match log_map.get(shift_date.as_str()) {
+    for (shift_date, slot, event_title) in &current_signups {
+        let needs_notification = match log_map.get(&(shift_date.as_str(), slot.as_str())) {
             None => true,                          // No log entry yet
             Some(&"removed") => true,              // Was removed, now re-added
             Some(&"added") => false,               // Already notified
@@ -161,15 +157,14 @@ async fn process_user_notifications(
         };
 
         if needs_notification {
-            // Get bar hours for this day
-            let bar_hours = get_bar_hours_for_shift(db, shift_date).await?;
+            let (open_time, close_time) = get_shift_times(db, shift_date, slot).await?;
 
             let params = ShiftIcalParams {
                 shift_date: shift_date.clone(),
                 event_title: event_title.clone(),
-                open_time: bar_hours.open_time.clone(),
-                close_time: bar_hours.close_time.clone(),
-                uid: ical::shift_uid(&user.id, shift_date),
+                open_time: open_time.clone(),
+                close_time: close_time.clone(),
+                uid: ical::shift_uid(&user.id, shift_date, slot),
             };
 
             let ical_event = ical::create_shift_ical_event(&params)
@@ -194,8 +189,8 @@ async fn process_user_notifications(
                 {}
                 <p>An iCal file is attached so you can add this to your calendar.</p>"#,
                 formatted_date,
-                bar_hours.open_time,
-                bar_hours.close_time,
+                open_time,
+                close_time,
                 if let Some(title) = event_title {
                     format!("<p><strong>Event:</strong> {}</p>", title)
                 } else {
@@ -215,21 +210,23 @@ async fn process_user_notifications(
             }
 
             // Update notification log
-            upsert_notification_log(db, &user.id, shift_date, "added").await?;
+            upsert_notification_log(db, &user.id, shift_date, slot, "added").await?;
         }
     }
 
     // Find shifts that need "removed" notifications
     for entry in &log_entries {
-        if entry.notification_type == "added" && !signup_dates.contains(entry.shift_date.as_str()) {
-            let bar_hours = get_bar_hours_for_shift(db, &entry.shift_date).await?;
+        if entry.notification_type == "added"
+            && !signed_up.contains(&(entry.shift_date.as_str(), entry.slot.as_str()))
+        {
+            let (open_time, close_time) = get_shift_times(db, &entry.shift_date, &entry.slot).await?;
 
             let params = ShiftIcalParams {
                 shift_date: entry.shift_date.clone(),
                 event_title: None,
-                open_time: bar_hours.open_time,
-                close_time: bar_hours.close_time,
-                uid: ical::shift_uid(&user.id, &entry.shift_date),
+                open_time,
+                close_time,
+                uid: ical::shift_uid(&user.id, &entry.shift_date, &entry.slot),
             };
 
             let cancel_ical = ical::create_cancel_ical(&params)
@@ -256,43 +253,38 @@ async fn process_user_notifications(
                 continue;
             }
 
-            upsert_notification_log(db, &user.id, &entry.shift_date, "removed").await?;
+            upsert_notification_log(db, &user.id, &entry.shift_date, &entry.slot, "removed").await?;
         }
     }
 
     Ok(())
 }
 
-async fn get_bar_hours_for_shift(db: &SqlitePool, shift_date: &str) -> Result<BarHours, String> {
-    let date = chrono::NaiveDate::parse_from_str(shift_date, "%Y-%m-%d")
-        .map_err(|e| format!("Invalid date: {}", e))?;
-
-    let day_of_week = date.format("%w").to_string().parse::<i32>().unwrap_or(0);
-
-    sqlx::query_as::<_, BarHours>(
-        "SELECT open_time, close_time FROM bar_hours WHERE day_of_week = ?"
-    )
-    .bind(day_of_week)
-    .fetch_one(db)
-    .await
-    .map_err(|e| format!("Failed to get bar hours: {}", e))
+async fn get_shift_times(db: &SqlitePool, shift_date: &str, slot: &str) -> Result<(String, String), String> {
+    let mut conn = db.acquire().await.map_err(|e| format!("Failed to get shift times: {}", e))?;
+    shift_times(&mut conn, shift_date, slot)
+        .await
+        .map_err(|e| format!("Failed to get shift times: {}", e))?
+        .ok_or_else(|| format!("No opening hours for {}", shift_date))
 }
 
 async fn upsert_notification_log(
     db: &SqlitePool,
     user_id: &str,
     shift_date: &str,
+    slot: &str,
     notification_type: &str,
 ) -> Result<(), String> {
     sqlx::query(
-        "INSERT INTO email_notification_log (user_id, shift_date, notification_type, sent_at)
-         VALUES (?, ?, ?, datetime('now'))
-         ON CONFLICT(user_id, shift_date) DO UPDATE SET
+        "INSERT INTO email_notification_log (user_id, shift_date, slot, notification_type, sent_at)
+         VALUES (?, ?, ?, ?, datetime('now'))
+         ON CONFLICT(user_id, shift_date, slot) DO UPDATE SET
              notification_type = excluded.notification_type,
              sent_at = excluded.sent_at"
     )
     .bind(user_id)
     .bind(shift_date)
+    .bind(slot)
     .bind(notification_type)
     .execute(db)
     .await

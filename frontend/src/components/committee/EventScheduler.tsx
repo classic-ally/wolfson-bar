@@ -33,6 +33,7 @@ export default function EventScheduler({
   const [endTime, setEndTime] = useState('')
   const [maxVolunteers, setMaxVolunteers] = useState<number | ''>('')
   const [requiresContract, setRequiresContract] = useState(false)
+  const [staffSeparately, setStaffSeparately] = useState(false)
   const [selectedDates, setSelectedDates] = useState<Date[]>([])
 
   // Sync form fields when the parent flips us into edit mode.
@@ -44,6 +45,7 @@ export default function EventScheduler({
       setEndTime(editingEvent.end_time || '')
       setMaxVolunteers(editingEvent.shift_max_volunteers ?? '')
       setRequiresContract(editingEvent.shift_requires_contract ?? false)
+      setStaffSeparately(editingEvent.staff_separately)
       setSelectedDates([])
     }
   }, [editingEvent])
@@ -55,7 +57,24 @@ export default function EventScheduler({
     setEndTime('')
     setMaxVolunteers('')
     setRequiresContract(false)
+    setStaffSeparately(false)
     setSelectedDates([])
+  }
+
+  /** A separate shift is defined by its times, so both are required. */
+  const missingShiftTimes = () => {
+    if (staffSeparately && (!startTime || !endTime)) {
+      alert('A separately-staffed event needs a start and end time')
+      return true
+    }
+    return false
+  }
+
+  const ensureOk = async (res: Response) => {
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.error || `Request failed (${res.status})`)
+    }
   }
 
   const handleSelectSlot = (date: Date) => {
@@ -79,6 +98,7 @@ export default function EventScheduler({
       alert('Please select at least one date')
       return
     }
+    if (missingShiftTimes()) return
     const token = localStorage.getItem('auth_token')
     if (!token) {
       alert('Not authenticated')
@@ -86,7 +106,7 @@ export default function EventScheduler({
     }
     try {
       for (const date of selectedDates) {
-        await fetch(`${API_BASE}/api/admin/events`, {
+        const res = await fetch(`${API_BASE}/api/admin/events`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -100,8 +120,10 @@ export default function EventScheduler({
             end_time: endTime || null,
             shift_max_volunteers: maxVolunteers === '' ? null : maxVolunteers,
             shift_requires_contract: requiresContract ? true : null,
+            staff_separately: staffSeparately,
           }),
         })
+        await ensureOk(res)
       }
       const created = selectedDates.length
       resetForm()
@@ -109,7 +131,7 @@ export default function EventScheduler({
       alert(`Successfully created ${created} event(s)!`)
     } catch (err) {
       console.error('Failed to create events:', err)
-      alert('Failed to create events. Please try again.')
+      alert(`Failed to create events: ${err instanceof Error ? err.message : 'please try again'}`)
     }
   }
 
@@ -119,13 +141,14 @@ export default function EventScheduler({
       alert('Please enter an event title')
       return
     }
+    if (missingShiftTimes()) return
     const token = localStorage.getItem('auth_token')
     if (!token) {
       alert('Not authenticated')
       return
     }
     try {
-      await fetch(`${API_BASE}/api/admin/events/${editingEvent.id}`, {
+      const res = await fetch(`${API_BASE}/api/admin/events/${editingEvent.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -138,15 +161,17 @@ export default function EventScheduler({
           end_time: endTime || null,
           shift_max_volunteers: maxVolunteers === '' ? null : maxVolunteers,
           shift_requires_contract: requiresContract ? true : null,
+          staff_separately: staffSeparately,
         }),
       })
+      await ensureOk(res)
       resetForm()
       onCancelEdit()
       onSaved()
       alert('Event updated successfully!')
     } catch (err) {
       console.error('Failed to update event:', err)
-      alert('Failed to update event. Please try again.')
+      alert(`Failed to update event: ${err instanceof Error ? err.message : 'please try again'}`)
     }
   }
 
@@ -168,6 +193,7 @@ export default function EventScheduler({
       end_time: endTime || null,
       shift_max_volunteers: null,
       shift_requires_contract: null,
+      staff_separately: staffSeparately,
     })),
   ]
 
@@ -307,6 +333,23 @@ export default function EventScheduler({
             </label>
             <div style={{ fontSize: '12px', color: '#666', marginTop: '3px', marginLeft: '26px' }}>
               Only volunteers with valid contracts can sign up for this shift
+            </div>
+          </div>
+
+          <div style={{ marginBottom: '15px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={staffSeparately}
+                onChange={(e) => setStaffSeparately(e.target.checked)}
+                style={{ marginRight: '8px', width: '18px', height: '18px', cursor: 'pointer' }}
+              />
+              <span style={{ fontWeight: 500 }}>Staff as separate shift</span>
+            </label>
+            <div style={{ fontSize: '12px', color: '#666', marginTop: '3px', marginLeft: '26px' }}>
+              Volunteers sign up for this event's times on their own, apart from the
+              night's regular shift. Needs a start and end time. Turning this off moves
+              anyone signed up onto the regular shift.
             </div>
           </div>
 

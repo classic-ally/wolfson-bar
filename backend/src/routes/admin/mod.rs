@@ -572,10 +572,13 @@ pub async fn get_overview_stats(
 
     // Get unstaffed shifts in next 3 days
     let unstaffed_shifts_next_3_days: i64 = sqlx::query_scalar(
-        "SELECT COUNT(DISTINCT e.event_date) FROM events e
+        "SELECT COUNT(DISTINCT e.event_date || '/' || CASE WHEN e.staff_separately THEN e.id ELSE '' END)
+         FROM events e
          WHERE e.event_date >= date('now')
          AND e.event_date <= date('now', '+3 days')
-         AND (SELECT COUNT(*) FROM shift_signups s WHERE s.shift_date = e.event_date) = 0"
+         AND (SELECT COUNT(*) FROM shift_signups s
+              WHERE s.shift_date = e.event_date
+              AND s.slot = CASE WHEN e.staff_separately THEN e.id ELSE '' END) = 0"
     )
     .fetch_one(&state.db)
     .await
@@ -589,7 +592,9 @@ pub async fn get_overview_stats(
          AND e.event_date <= date('now', '+7 days')
          AND e.title IS NOT NULL
          AND COALESCE(e.shift_max_volunteers, 2) > (
-             SELECT COUNT(*) FROM shift_signups s WHERE s.shift_date = e.event_date
+             SELECT COUNT(*) FROM shift_signups s
+             WHERE s.shift_date = e.event_date
+             AND s.slot = CASE WHEN e.staff_separately THEN e.id ELSE '' END
          )"
     )
     .fetch_one(&state.db)

@@ -91,6 +91,8 @@ pub struct Event {
     pub end_time: Option<String>,
     pub shift_max_volunteers: Option<i32>,
     pub shift_requires_contract: Option<bool>,
+    /// Staffed as its own shift rather than as part of the night's regular shift.
+    pub staff_separately: bool,
 }
 
 impl User {

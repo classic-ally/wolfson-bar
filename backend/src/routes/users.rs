@@ -13,6 +13,7 @@ use crate::auth::{AuthenticatedUser, Claims};
 use crate::models::{ErrorResponse, IS_ROTA_MEMBER_SQL};
 use crate::routes::coc::{current_coc_version, record_signature};
 use crate::routes::auth::AppState;
+use crate::slots::SLOT_TITLE_SQL;
 
 #[derive(Debug, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -686,12 +687,12 @@ pub async fn export_my_data(
     AuthenticatedUser(user): AuthenticatedUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
     // Get shift signups
-    let signups: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
-        "SELECT s.shift_date,
-                (SELECT title FROM events WHERE event_date = s.shift_date) as event_title,
-                s.checked_in_at
-         FROM shift_signups s WHERE s.user_id = ? ORDER BY s.shift_date"
-    )
+    let signups: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(&format!(
+        "SELECT ss.shift_date,
+                {SLOT_TITLE_SQL} as event_title,
+                ss.checked_in_at
+         FROM shift_signups ss WHERE ss.user_id = ? ORDER BY ss.shift_date"
+    ))
     .bind(&user.id)
     .fetch_all(&state.db)
     .await
