@@ -192,7 +192,7 @@ async fn process_user_notifications(
                 open_time,
                 close_time,
                 if let Some(title) = event_title {
-                    format!("<p><strong>Event:</strong> {}</p>", title)
+                    format!("<p><strong>Event:</strong> {}</p>", escape_html(title))
                 } else {
                     String::new()
                 }
@@ -205,7 +205,7 @@ async fn process_user_notifications(
             };
 
             if let Err(e) = email_service.send_email(&user.email, &subject, &html, Some(attachment)).await {
-                error!("Failed to send addition email to {}: {}", user.email, e);
+                error!("Failed to send addition email to user {}: {}", user.id, e);
                 continue;
             }
 
@@ -249,7 +249,7 @@ async fn process_user_notifications(
             };
 
             if let Err(e) = email_service.send_email(&user.email, &subject, &html, Some(attachment)).await {
-                error!("Failed to send removal email to {}: {}", user.email, e);
+                error!("Failed to send removal email to user {}: {}", user.id, e);
                 continue;
             }
 
@@ -291,6 +291,14 @@ async fn upsert_notification_log(
     .map_err(|e| format!("Failed to update notification log: {}", e))?;
 
     Ok(())
+}
+
+/// Escape text for an HTML email body.
+fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 fn format_shift_date(date_str: &str) -> String {

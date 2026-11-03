@@ -49,7 +49,8 @@ pub struct SlotEvent {
     pub staff_separately: bool,
 }
 
-fn minutes(t: &str) -> Option<u32> {
+/// Minutes after midnight of an `HH:MM` time.
+pub fn minutes(t: &str) -> Option<u32> {
     let (h, m) = t.split_once(':')?;
     Some(h.parse::<u32>().ok()? * 60 + m.parse::<u32>().ok()?)
 }

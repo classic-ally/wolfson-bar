@@ -28,58 +28,46 @@ pub async fn create_user_in_db(
     email: Option<String>,
     passkey_credential: Option<String>,
 ) -> Result<User, (StatusCode, Json<ErrorResponse>)> {
-    // Check if this is the first user
-    let user_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
-        .fetch_one(db)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: format!("Database error: {}", e),
-                }),
-            )
-        })?;
-
-    let is_first_user = user_count.0 == 0;
-    if is_first_user {
-        info!("👑 First user - granting admin and committee permissions");
-    }
-
-    let mut user = User::new(
-        display_name,
-        passkey_credential,
-        is_first_user,
-        is_first_user,
-    );
+    let mut user = User::new(display_name, passkey_credential, false, false);
     user.email = email;
 
     info!("💾 Storing user with ID: {}", user.id);
 
-    sqlx::query("INSERT INTO users (id, display_name, passkey_credential, is_committee, is_admin, code_of_conduct_signed, food_safety_completed, food_safety_certificate, induction_completed, has_contract, contract_expiry_date, created_at, email) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-        .bind(&user.id)
-        .bind(&user.display_name)
-        .bind(&user.passkey_credential)
-        .bind(user.is_committee)
-        .bind(user.is_admin)
-        .bind(user.code_of_conduct_signed)
-        .bind(user.food_safety_completed)
-        .bind(&user.food_safety_certificate)
-        .bind(user.induction_completed)
-        .bind(user.has_contract)
-        .bind(&user.contract_expiry_date)
-        .bind(&user.created_at)
-        .bind(&user.email)
-        .execute(db)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: format!("Failed to create user: {}", e),
-                }),
-            )
-        })?;
+    // The first account becomes admin and committee. Deciding that inside the
+    // INSERT keeps it atomic, so two sign-ups racing on an empty database
+    // can't both be made admin.
+    let (is_committee, is_admin): (bool, bool) = sqlx::query_as(
+        "INSERT INTO users (id, display_name, passkey_credential, is_committee, is_admin, code_of_conduct_signed, food_safety_completed, food_safety_certificate, induction_completed, has_contract, contract_expiry_date, created_at, email)
+         SELECT ?, ?, ?, first, first, ?, ?, ?, ?, ?, ?, ?, ?
+         FROM (SELECT NOT EXISTS (SELECT 1 FROM users) AS first)
+         RETURNING is_committee, is_admin",
+    )
+    .bind(&user.id)
+    .bind(&user.display_name)
+    .bind(&user.passkey_credential)
+    .bind(user.code_of_conduct_signed)
+    .bind(user.food_safety_completed)
+    .bind(&user.food_safety_certificate)
+    .bind(user.induction_completed)
+    .bind(user.has_contract)
+    .bind(&user.contract_expiry_date)
+    .bind(&user.created_at)
+    .bind(&user.email)
+    .fetch_one(db)
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Failed to create user: {}", e),
+            }),
+        )
+    })?;
+    user.is_committee = is_committee;
+    user.is_admin = is_admin;
+    if is_admin {
+        info!("👑 First user - granted admin and committee permissions");
+    }
 
     Ok(user)
 }
@@ -574,6 +562,18 @@ mod passkey_tests {
         let start = login_start_json(&state).await;
         let credential = sign(&mut stranger, &start);
         assert_eq!(finish(&state, &start["state_id"], &credential).await.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    // Impact: the first account is made admin; with a separate count and insert,
+    // two sign-ups racing on a fresh install could both become admin.
+    // Should: make only the first account admin and committee.
+    #[tokio::test]
+    async fn only_the_first_account_is_admin() {
+        let state = test_state().await;
+        let first = create_user_in_db(&state.db, Some("First".into()), None, None).await.unwrap();
+        let second = create_user_in_db(&state.db, Some("Second".into()), None, None).await.unwrap();
+        assert!(first.is_admin && first.is_committee);
+        assert!(!second.is_admin && !second.is_committee);
     }
 
     async fn stored_member(state: &AppState, user_id: &str) -> (Option<String>, Option<String>) {

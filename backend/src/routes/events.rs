@@ -154,6 +154,19 @@ fn validate_event(event: &Event) -> Result<(), (StatusCode, Json<ErrorResponse>)
     if event.end_time.as_deref().is_some_and(|t| !valid_time(t)) {
         return Err(bad("Invalid end_time format. Use HH:MM"));
     }
+    // Event text ends up in calendar files, file names and emails. Line breaks
+    // are fine in a description; other control characters (e.g. a bare CR,
+    // which splits iCal lines) aren't.
+    if event.title.trim().is_empty() || event.title.chars().any(char::is_control) {
+        return Err(bad("Title can't be empty or contain line breaks or control characters"));
+    }
+    if event
+        .description
+        .as_deref()
+        .is_some_and(|d| d.chars().any(|c| c.is_control() && c != '\n' && c != '\t'))
+    {
+        return Err(bad("Description can't contain control characters"));
+    }
     if event.staff_separately && (event.start_time.is_none() || event.end_time.is_none()) {
         return Err(bad("An event staffed as a separate shift needs a start and end time"));
     }
@@ -181,7 +194,7 @@ pub async fn create_event(
     let event = Event {
         id: Uuid::new_v4().to_string(),
         title: req.title,
-        description: req.description,
+        description: req.description.map(|d| d.replace("\r\n", "\n")),
         event_date: req.event_date,
         start_time: req.start_time,
         end_time: req.end_time,
@@ -244,7 +257,7 @@ pub async fn update_event(
         event.title = title;
     }
     if let Some(description) = req.description {
-        event.description = Some(description);
+        event.description = Some(description.replace("\r\n", "\n"));
     }
     if let Some(event_date) = req.event_date {
         event.event_date = event_date;
@@ -396,6 +409,36 @@ mod tests {
             .await
             .expect_err("missing end time");
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    // Impact: a bare carriage return in a title splits iCal lines, and quotes or
+    // non-ASCII broke the download's file name.
+    // Should: refuse event titles with line breaks or control characters.
+    // Should: accept line breaks in a description, normalised to \n.
+    #[tokio::test]
+    async fn event_text_is_checked() {
+        let state = test_state().await;
+        let req = |title: &str, description: &str| CreateEventRequest {
+            title: title.to_string(),
+            description: Some(description.to_string()),
+            event_date: NIGHT.to_string(),
+            start_time: None,
+            end_time: None,
+            shift_max_volunteers: None,
+            shift_requires_contract: None,
+            staff_separately: None,
+        };
+        let committee = || CommitteeUser(user_with_role(true, false));
+
+        let (status, _) = create_event(State(state.clone()), committee(), Json(req("Party\rX-EVIL:1", "")))
+            .await
+            .expect_err("control character in title");
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        let Json(event) = create_event(State(state), committee(), Json(req("Café night", "Line one\r\nLine two")))
+            .await
+            .unwrap();
+        assert_eq!(event.description.as_deref(), Some("Line one\nLine two"));
     }
 
     // Impact: unflagging must not silently drop members' bookings for that night.

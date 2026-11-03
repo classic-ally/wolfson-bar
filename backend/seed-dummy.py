@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import hashlib
 import random
 import sqlite3
 import sys
@@ -141,7 +142,7 @@ def wipe_dummies(con: sqlite3.Connection) -> None:
     cur.execute("DELETE FROM shift_signups WHERE user_id LIKE ?", (DUMMY_PREFIX + "%",))
     cur.execute("DELETE FROM users WHERE id LIKE ?", (DUMMY_PREFIX + "%",))
     cur.execute("DELETE FROM events WHERE id LIKE ?", (DUMMY_PREFIX + "%",))
-    cur.execute("DELETE FROM magic_link_tokens WHERE token LIKE ?", (DUMMY_PREFIX + "%",))
+    cur.execute("DELETE FROM magic_link_tokens WHERE id LIKE ?", (DUMMY_PREFIX + "%",))
     con.commit()
 
 
@@ -329,8 +330,8 @@ def seed_magic_links(con: sqlite3.Connection, members: list[dict]) -> list[tuple
     """Insert one usable magic-link token per dummy user.
 
     The token value is `dummy-link-{suffix}` so devs can paste it into the
-    verify URL. The verify endpoint enforces a 15-minute age — re-run this
-    script to refresh."""
+    verify URL; like the server, only its SHA-256 is stored. Tokens are
+    single use and expire after 15 minutes — re-run this script to refresh."""
     cur = con.cursor()
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     links: list[tuple[str, str]] = []
@@ -344,7 +345,7 @@ def seed_magic_links(con: sqlite3.Connection, members: list[dict]) -> list[tuple
                 id, email, token, created_at, used, ip_address
             ) VALUES (?, ?, ?, ?, 0, '127.0.0.1')
             """,
-            (token_id, m["email"], token, now),
+            (token_id, m["email"], hashlib.sha256(token.encode()).hexdigest(), now),
         )
         links.append((m["name"], token))
     con.commit()

@@ -221,6 +221,14 @@ async fn insert_signup(
     Ok(())
 }
 
+/// Start a transaction holding the write lock from the outset. Capacity is
+/// checked then booked in one transaction; with a plain BEGIN, two concurrent
+/// bookings both read first and the loser fails with SQLITE_BUSY (a 500)
+/// instead of waiting its turn and seeing the shift full.
+async fn begin_booking(db: &sqlx::SqlitePool, context: &'static str) -> Result<sqlx::Transaction<'static, sqlx::Sqlite>, ApiError> {
+    db.begin_with("BEGIN IMMEDIATE").await.map_err(internal(context))
+}
+
 fn require_onboarded(user: &User) -> Result<(), ApiError> {
     if user.can_signup_for_shifts() {
         Ok(())
@@ -387,7 +395,7 @@ pub async fn signup_for_shift(
     require_not_past(&state, parse_date(&date)?)?;
     require_onboarded(&user)?;
 
-    let mut tx = state.db.begin().await.map_err(internal("Failed to create signup"))?;
+    let mut tx = begin_booking(&state.db, "Failed to create signup").await?;
     let shift = find_slot(&mut tx, &date, &slot).await?;
     check_can_take(&mut tx, &date, &shift, &Volunteer::member(&user)).await?;
     insert_signup(&mut tx, &date, &slot, &user.id, ALREADY_SIGNED_UP).await?;
@@ -408,7 +416,7 @@ pub async fn signup_for_whole_night(
     require_not_past(&state, parse_date(&date)?)?;
     require_onboarded(&user)?;
 
-    let mut tx = state.db.begin().await.map_err(internal("Failed to create signup"))?;
+    let mut tx = begin_booking(&state.db, "Failed to create signup").await?;
     let slots = load_slots(&mut tx, &date).await.map_err(internal("Failed to fetch shifts"))?;
     let volunteer = Volunteer::member(&user);
 
@@ -538,7 +546,7 @@ pub async fn admin_assign_to_shift(
 
     parse_date(&date)?;
 
-    let mut tx = state.db.begin().await.map_err(internal("Failed to assign user to shift"))?;
+    let mut tx = begin_booking(&state.db, "Failed to assign user to shift").await?;
 
     let has_contract: bool = sqlx::query_scalar("SELECT has_contract FROM users WHERE id = ?")
         .bind(&target_user_id)

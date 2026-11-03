@@ -13,6 +13,7 @@ use webauthn_rs::prelude::Url;
 
 use crate::auth::create_jwt_token;
 use crate::email::EmailService;
+use crate::routes::kiosk::hash_token;
 use crate::models::ErrorResponse;
 use crate::routes::auth::{create_user_in_db, AppState};
 
@@ -121,7 +122,9 @@ pub enum TokenUse<'a> {
     Confirm { user_id: &'a str },
 }
 
-/// Store a new single-use link token for `email`.
+/// Store a new single-use link token for `email`, returning the raw token for
+/// the link. Only its SHA-256 is stored, so a leaked database or backup holds
+/// no usable sign-in links.
 pub async fn issue_token(db: &SqlitePool, email: &str, ip: &str, use_: TokenUse<'_>) -> Result<String, sqlx::Error> {
     let token_bytes: [u8; 32] = rand::random();
     let token = base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, token_bytes);
@@ -136,7 +139,7 @@ pub async fn issue_token(db: &SqlitePool, email: &str, ip: &str, use_: TokenUse<
     )
     .bind(Uuid::new_v4().to_string())
     .bind(email)
-    .bind(&token)
+    .bind(hash_token(&token))
     .bind(ip)
     .bind(display_name)
     .bind(user_id)
@@ -312,7 +315,7 @@ pub async fn redeem_magic_link(
          WHERE token = ? AND NOT used AND created_at >= datetime('now', '-15 minutes')
          RETURNING email, display_name, user_id",
     )
-    .bind(&req.token)
+    .bind(hash_token(&req.token))
     .fetch_optional(&state.db)
     .await
     .map_err(internal)?;
@@ -379,7 +382,7 @@ mod tests {
         )
         .bind(Uuid::new_v4().to_string())
         .bind(email)
-        .bind(token)
+        .bind(hash_token(token))
         .bind(format!("-{age_minutes} minutes"))
         .execute(&state.db)
         .await

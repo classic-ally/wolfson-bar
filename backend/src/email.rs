@@ -86,7 +86,7 @@ impl EmailService {
             return Err(format!("Email send failed ({}): {}", status, body));
         }
 
-        info!("Email sent successfully to {}", to);
+        info!("Email sent successfully");
         Ok(())
     }
 }

@@ -20,11 +20,20 @@ use crate::slots::SLOT_TITLE_SQL;
 
 /// RFC 4180 CSV field escaping. Wraps the value in quotes and doubles any
 /// embedded quotes if it contains a comma, quote, or line break.
+///
+/// Values starting with a formula character get a leading `'`: member-chosen
+/// text like a display name of `=HYPERLINK(...)` would otherwise run as a
+/// formula when the committee opens the export in Excel or Sheets.
 fn csv_field(s: &str) -> String {
+    let s = if s.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        format!("'{s}")
+    } else {
+        s.to_string()
+    };
     if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
         format!("\"{}\"", s.replace('"', "\"\""))
     } else {
-        s.to_string()
+        s
     }
 }
 
@@ -227,6 +236,17 @@ mod tests {
     #[test]
     fn csv_field_with_carriage_return_is_wrapped() {
         assert_eq!(csv_field("line1\rline2"), "\"line1\rline2\"");
+    }
+
+    // Impact: a member's display name like =HYPERLINK(...) ran as a formula when
+    // the committee opened an export in Excel or Sheets.
+    // Should: neutralise values that start with a formula character.
+    #[test]
+    fn csv_field_neutralises_formulas() {
+        assert_eq!(csv_field("=1+1"), "'=1+1");
+        assert_eq!(csv_field("@SUM(A1)"), "'@SUM(A1)");
+        assert_eq!(csv_field("=HYPERLINK(\"x\",\"y\")"), "\"'=HYPERLINK(\"\"x\"\",\"\"y\"\")\"");
+        assert_eq!(csv_field("Sam"), "Sam");
     }
 
     #[test]

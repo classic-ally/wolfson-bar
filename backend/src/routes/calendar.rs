@@ -192,7 +192,14 @@ pub async fn download_event(
 
     // Generate iCal string
     let ical_string = calendar.to_string();
-    let filename = format!("frontend-{}.ics", event.title.replace(' ', "-").to_lowercase());
+    // Only [a-z0-9-] from the title: quotes or non-ASCII would break the header.
+    let slug: String = event
+        .title
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let filename = format!("frontend-{}.ics", slug.trim_matches('-'));
 
     Ok((
         [(header::CONTENT_TYPE, "text/calendar; charset=utf-8"),

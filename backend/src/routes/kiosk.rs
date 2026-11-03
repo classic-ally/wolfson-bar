@@ -34,7 +34,7 @@ use crate::auth::{AuthenticatedUser, CommitteeUser, KioskDevice};
 use crate::constants::BAR_TZ;
 use crate::models::ErrorResponse;
 use crate::routes::auth::AppState;
-use crate::slots::{load_slots, slot_at, Slot};
+use crate::slots::{load_slots, minutes, slot_at, Slot};
 
 /// Rotation period for check-in codes, in seconds.
 pub const PERIOD_SECS: u64 = 30;
@@ -44,6 +44,13 @@ const PAIRING_TTL_MINUTES: i64 = 10;
 
 /// `pair_start` is public; cap unapproved pairings so it can't grow the DB unbounded.
 const MAX_PENDING_PAIRINGS: i64 = 20;
+
+/// Unapproved pairings one client may hold, so one client can't fill the
+/// overall cap and block the real kiosk from pairing.
+const MAX_PENDING_PAIRINGS_PER_IP: i64 = 3;
+
+/// How early before the night's first shift a check-in may open the bar, for setting up.
+const SETUP_MINUTES: u32 = 60;
 
 const TS_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 
@@ -263,6 +270,19 @@ pub async fn pair_start(
         return Err(reject(StatusCode::TOO_MANY_REQUESTS, "Too many pending pairings; try again later"));
     }
 
+    let ip = client_ip(&headers, peer.map(|ConnectInfo(addr)| addr));
+    if let Some(ip) = &ip {
+        let from_ip: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM kiosk_pairings WHERE status = 'pending' AND client_ip = ?")
+                .bind(ip)
+                .fetch_one(&state.db)
+                .await
+                .map_err(internal)?;
+        if from_ip >= MAX_PENDING_PAIRINGS_PER_IP {
+            return Err(reject(StatusCode::TOO_MANY_REQUESTS, "Too many pending pairings; try again later"));
+        }
+    }
+
     let user_agent = headers
         .get(axum::http::header::USER_AGENT)
         .and_then(|h| h.to_str().ok())
@@ -277,7 +297,7 @@ pub async fn pair_start(
     .bind(&req.token_hash)
     .bind(&now_ts)
     .bind(format_ts(now + Duration::minutes(PAIRING_TTL_MINUTES)))
-    .bind(client_ip(&headers, peer.map(|ConnectInfo(addr)| addr)))
+    .bind(&ip)
     .bind(user_agent)
     .execute(&state.db)
     .await
@@ -571,7 +591,8 @@ pub async fn check_in(
     let now_ts = format_ts(now);
     let now_local = bar_local(now);
 
-    let mut tx = state.db.begin().await.map_err(internal)?;
+    // Holds the write lock from the start: a walk-in checks capacity then books.
+    let mut tx = state.db.begin_with("BEGIN IMMEDIATE").await.map_err(internal)?;
 
     let hours = load_bar_hours(&mut *tx).await.map_err(internal)?;
     let shift_date = active_shift_date(now_local, &hours).format("%Y-%m-%d").to_string();
@@ -639,7 +660,12 @@ pub async fn check_in(
             .await
             .map_err(internal)?;
     let already_open = is_open && effective_open(opened_at.as_deref().and_then(parse_ts), &hours, now);
-    let within_hours = shift_close(&hours, now_local).map_or(true, |close| now_local < close);
+    // Only open the bar once the night is under way (allowing set-up time before
+    // its first shift) and before it closes: a morning check-in, or one on a night
+    // with no opening hours or shifts, records attendance without opening it.
+    let first_start = slots.iter().filter_map(|s| s.start_time.as_deref().and_then(minutes)).min();
+    let started = first_start.is_some_and(|start| now_minute + SETUP_MINUTES >= start);
+    let within_hours = started && shift_close(&hours, now_local).map_or(true, |close| now_local < close);
 
     // Keep the original opener/time when the bar is already open.
     if !already_open && within_hours {
@@ -1149,6 +1175,39 @@ mod tests {
         assert_eq!(res.status(), Status::TOO_MANY_REQUESTS);
     }
 
+    // Impact: pair_start is public; without a per-client cap one client could hold
+    // every pending slot and stop the real kiosk pairing.
+    // Should: refuse a client more pending pairings than its share, while others can still pair.
+    #[tokio::test]
+    async fn pair_start_caps_pending_pairings_per_client() {
+        let state = test_state().await;
+        let start_from = |ip: [u8; 4], n: usize| {
+            let state = state.clone();
+            async move {
+                build_app(state)
+                    .oneshot(
+                        axum::http::Request::builder()
+                            .method("POST")
+                            .uri("/api/kiosk/pair/start")
+                            .extension(ConnectInfo(SocketAddr::from((ip, 40000))))
+                            .header("content-type", "application/json")
+                            .body(axum::body::Body::from(
+                                serde_json::json!({ "token_hash": hash_token(&format!("{ip:?}-{n}")) }).to_string(),
+                            ))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap()
+                    .status()
+            }
+        };
+        for n in 0..MAX_PENDING_PAIRINGS_PER_IP as usize {
+            assert_eq!(start_from([192, 0, 2, 1], n).await, Status::OK);
+        }
+        assert_eq!(start_from([192, 0, 2, 1], 99).await, Status::TOO_MANY_REQUESTS);
+        assert_eq!(start_from([192, 0, 2, 2], 0).await, Status::OK);
+    }
+
     // Impact: the approver trusts the shown IP to tell the bar PC from an
     // attacker's device, so a client-supplied X-Forwarded-For must not count.
     // Should: show the approver where the pairing came from and how many kiosks it will replace.
@@ -1202,6 +1261,33 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.status(), Status::FORBIDDEN);
+    }
+
+    // Impact: a check-in code texted to someone, or scanned in the morning,
+    // used to open the bar hours before it was due to.
+    // Should: record a morning check-in without opening the bar.
+    #[tokio::test]
+    async fn morning_check_in_does_not_open_the_bar() {
+        let state = test_state_at(london(2026, 6, 17, 9, 0)).await;
+        let (member, token) = rota_member(&state).await;
+        insert_shift_signup(&state.db, &member.id, "2026-06-17").await;
+
+        let res = check_in_as(&state, &token).await;
+        assert_eq!(res.status(), Status::OK);
+        assert_eq!(body_json(res).await["bar_open"], false);
+        assert!(!bar_row(&state).await.0);
+        assert!(checked_in_at(&state, "2026-06-17", &member.id).await.is_some());
+    }
+
+    // Should: let a check-in open the bar shortly before a split night's early shift.
+    #[tokio::test]
+    async fn check_in_before_an_early_shift_opens_the_bar() {
+        let state = test_state_at(london(2026, 6, 19, 18, 0)).await;
+        insert_separate_event(&state.db, "early", "2026-06-19", "18:30", "21:00", None).await;
+        let (_, token) = rota_member(&state).await;
+
+        let res = check_in_as(&state, &token).await;
+        assert_eq!(body_json(res).await["bar_open"], true);
     }
 
     // --- split nights ---

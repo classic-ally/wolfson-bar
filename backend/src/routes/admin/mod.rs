@@ -148,17 +148,21 @@ pub async fn get_certificate(
     // mis-typed/NULL rows are corrected at serve time (before the
     // backfill migration has necessarily touched them). Fall back to the
     // stored column, then octet-stream.
-    let content_type = crate::routes::cert_type::sniff_certificate_type(&certificate_bytes)
-        .map(|s| s.to_string())
-        .or(target_user.food_safety_certificate_type)
-        .unwrap_or_else(|| "application/octet-stream".to_string());
+    // Only content recognised as a PDF or image is shown inline. Anything else
+    // (e.g. an old upload stored with a client-declared HTML or SVG type) is
+    // downloaded rather than rendered on the site's origin, so the stored type
+    // column isn't trusted.
+    let (content_type, disposition) = match crate::routes::cert_type::sniff_certificate_type(&certificate_bytes) {
+        Some(sniffed) => (sniffed, "inline"),
+        None => ("application/octet-stream", "attachment; filename=\"certificate\""),
+    };
 
-    // Return file as response with correct content type. Inline so the
-    // browser renders (PDF viewer / image) rather than downloading.
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, content_type)
-        .header(header::CONTENT_DISPOSITION, "inline")
+        .header(header::CONTENT_DISPOSITION, disposition)
+        .header("X-Content-Type-Options", "nosniff")
+        .header(header::CONTENT_SECURITY_POLICY, "sandbox")
         .body(Body::from(certificate_bytes))
         .unwrap())
 }
