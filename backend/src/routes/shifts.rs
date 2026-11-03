@@ -10,6 +10,7 @@ use tracing::{info, error};
 use ts_rs::TS;
 
 use crate::auth::{AuthenticatedUser, CommitteeUser};
+use crate::constants::BAR_TZ;
 use crate::models::{ErrorResponse, User};
 use crate::routes::auth::AppState;
 use crate::slots::{build_slots, events_on, load_slots, Slot, REGULAR_SLOT};
@@ -102,10 +103,27 @@ fn internal(context: &'static str) -> impl Fn(sqlx::Error) -> ApiError {
     }
 }
 
+/// A `YYYY-MM-DD` date in exactly that form. chrono also accepts e.g.
+/// `2026-6-1`; such aliases would be stored as a different night from
+/// `2026-06-01` and miss that night's events and staffing rules.
 fn parse_date(date: &str) -> Result<chrono::NaiveDate, ApiError> {
     chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
-        .map_err(|_| reject(StatusCode::BAD_REQUEST, "Invalid date format"))
+        .ok()
+        .filter(|d| d.format("%Y-%m-%d").to_string() == date)
+        .ok_or_else(|| reject(StatusCode::BAD_REQUEST, "Invalid date format"))
 }
+
+/// Members can only book tonight or later; committee can still record past shifts.
+fn require_not_past(state: &AppState, date: chrono::NaiveDate) -> Result<(), ApiError> {
+    let today = state.clock.now().with_timezone(&BAR_TZ).date_naive();
+    if date < today {
+        return Err(reject(StatusCode::BAD_REQUEST, "This shift has already happened"));
+    }
+    Ok(())
+}
+
+/// Longest date range `GET /api/shifts` serves in one request.
+const MAX_SHIFT_RANGE_DAYS: i64 = 400;
 
 /// The shift `key` on the night starting `date`, or 404.
 async fn find_slot(conn: &mut SqliteConnection, date: &str, key: &str) -> Result<Slot, ApiError> {
@@ -222,10 +240,16 @@ pub async fn get_shifts(
 ) -> Result<Json<Vec<ShiftInfo>>, ApiError> {
     info!("📋 Fetching shifts from {} to {}", params.start_date, params.end_date);
 
-    let start = chrono::NaiveDate::parse_from_str(&params.start_date, "%Y-%m-%d")
+    let start = parse_date(&params.start_date)
         .map_err(|_| reject(StatusCode::BAD_REQUEST, "Invalid start_date format"))?;
-    let end = chrono::NaiveDate::parse_from_str(&params.end_date, "%Y-%m-%d")
+    let end = parse_date(&params.end_date)
         .map_err(|_| reject(StatusCode::BAD_REQUEST, "Invalid end_date format"))?;
+    if end < start || (end - start).num_days() > MAX_SHIFT_RANGE_DAYS {
+        return Err(reject(
+            StatusCode::BAD_REQUEST,
+            &format!("Date range must run forwards and span at most {MAX_SHIFT_RANGE_DAYS} days"),
+        ));
+    }
 
     let mut conn = state.db.acquire().await.map_err(internal("Failed to fetch shifts"))?;
 
@@ -360,7 +384,7 @@ pub async fn signup_for_shift(
 ) -> Result<StatusCode, ApiError> {
     info!("➕ User {} signing up for shift {:?} on {}", user.id, slot, date);
 
-    parse_date(&date)?;
+    require_not_past(&state, parse_date(&date)?)?;
     require_onboarded(&user)?;
 
     let mut tx = state.db.begin().await.map_err(internal("Failed to create signup"))?;
@@ -381,7 +405,7 @@ pub async fn signup_for_whole_night(
 ) -> Result<Json<WholeNightSignup>, ApiError> {
     info!("➕ User {} signing up for the whole night on {}", user.id, date);
 
-    parse_date(&date)?;
+    require_not_past(&state, parse_date(&date)?)?;
     require_onboarded(&user)?;
 
     let mut tx = state.db.begin().await.map_err(internal("Failed to create signup"))?;
@@ -698,7 +722,7 @@ mod tests {
         let result = signup_for_shift(
             State(state),
             AuthenticatedUser(user),
-            Path("2026-05-01".to_string()),
+            Path("2026-07-03".to_string()),
             Query(SlotQuery::default()),
         )
         .await;
@@ -721,7 +745,7 @@ mod tests {
         let result = signup_for_shift(
             State(state),
             AuthenticatedUser(user),
-            Path("2026-05-01".to_string()),
+            Path("2026-07-03".to_string()),
             Query(SlotQuery::default()),
         )
         .await;
@@ -743,7 +767,7 @@ mod tests {
         let result = signup_for_shift(
             State(state),
             AuthenticatedUser(user),
-            Path("2026-05-01".to_string()),
+            Path("2026-07-03".to_string()),
             Query(SlotQuery::default()),
         )
         .await;
@@ -790,5 +814,59 @@ mod tests {
 
         let seen = signups_seen_by(&state, member).await;
         assert_eq!(seen[0].needs_coc, None);
+    }
+
+    // Impact: chrono parses `2026-6-19` as 2026-06-19, but it would be stored as
+    // a separate night that skips that night's capacity, contract and split shifts.
+    // Should: refuse dates not written exactly as YYYY-MM-DD.
+    #[tokio::test]
+    async fn non_canonical_date_is_refused() {
+        let state = test_state().await;
+        let member = user_with(true, true, true, true);
+        insert_user(&state.db, &member).await;
+        let (status, _) = signup_for_shift(
+            State(state),
+            AuthenticatedUser(member),
+            Path("2026-6-19".to_string()),
+            Query(SlotQuery::default()),
+        )
+        .await
+        .expect_err("alias date");
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    // Should: refuse a member booking a night that has already passed.
+    #[tokio::test]
+    async fn past_night_is_refused() {
+        let state = test_state().await;
+        let member = user_with(true, true, true, true);
+        insert_user(&state.db, &member).await;
+        let (status, body) = signup_for_shift(
+            State(state),
+            AuthenticatedUser(member),
+            Path("2026-06-01".to_string()),
+            Query(SlotQuery::default()),
+        )
+        .await
+        .expect_err("past date");
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body.error.contains("already happened"), "{}", body.error);
+    }
+
+    // Impact: one request for thousands of years of nights would tie up the database pool.
+    // Should: refuse a shift range longer than the cap or running backwards.
+    #[tokio::test]
+    async fn oversized_range_is_refused() {
+        let state = test_state().await;
+        let member = user_with(true, true, true, true);
+        for (start, end) in [("0001-01-01", "9999-12-31"), ("2026-07-01", "2026-06-01")] {
+            let result = get_shifts(
+                State(state.clone()),
+                AuthenticatedUser(member.clone()),
+                Query(ShiftsQuery { start_date: start.to_string(), end_date: end.to_string() }),
+            )
+            .await;
+            assert_eq!(result.expect_err("range refused").0, StatusCode::BAD_REQUEST);
+        }
     }
 }

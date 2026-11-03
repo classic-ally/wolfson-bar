@@ -4,10 +4,11 @@ use axum::{
     Json,
     response::Redirect,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use tracing::{info, error};
 use uuid::Uuid;
+use webauthn_rs::prelude::Url;
 
 use crate::auth::create_jwt_token;
 use crate::models::ErrorResponse;
@@ -156,95 +157,142 @@ pub async fn request_magic_link(
     Ok(StatusCode::OK)
 }
 
-/// Verify a magic link token and redirect with JWT
+/// Landing for the link in the email. Only redirects to the sign-in page, which
+/// redeems the token on a button press: mail scanners and link previews fetch
+/// GET links, and must not use up a single-use token.
 pub async fn verify_magic_link(
     State(state): State<AppState>,
     Query(params): Query<MagicLinkVerifyQuery>,
-) -> Result<Redirect, (StatusCode, Json<ErrorResponse>)> {
-    info!("Magic link verification attempt");
+) -> Redirect {
+    let callback = format!("{}/auth/magic-link-callback", state.public_url);
+    match Url::parse(&callback) {
+        Ok(mut url) => {
+            url.query_pairs_mut().append_pair("token", &params.token);
+            Redirect::temporary(url.as_str())
+        }
+        Err(_) => Redirect::temporary(&callback),
+    }
+}
 
-    // Look up unused token, check age
-    let token_record: Option<(String, String, String)> = sqlx::query_as(
-        "SELECT id, email, created_at FROM magic_link_tokens WHERE token = ?"
+#[derive(Debug, Serialize)]
+pub struct MagicLinkSession {
+    pub token: String,
+    pub user_id: String,
+    pub is_committee: bool,
+    pub is_admin: bool,
+}
+
+/// Redeem a magic link token for a session. Each token works once, within 15
+/// minutes of being issued.
+pub async fn redeem_magic_link(
+    State(state): State<AppState>,
+    Json(req): Json<MagicLinkVerifyQuery>,
+) -> Result<Json<MagicLinkSession>, (StatusCode, Json<ErrorResponse>)> {
+    info!("Magic link redemption attempt");
+
+    let bad = |error: &str| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: error.to_string() }));
+    let internal = |e: sqlx::Error| {
+        error!("Failed to redeem magic link: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Database error".to_string() }))
+    };
+
+    // Claim the token atomically so two concurrent redemptions can't both succeed.
+    let email: Option<String> = sqlx::query_scalar(
+        "UPDATE magic_link_tokens SET used = TRUE
+         WHERE token = ? AND NOT used AND created_at >= datetime('now', '-15 minutes')
+         RETURNING email",
     )
-    .bind(&params.token)
+    .bind(&req.token)
     .fetch_optional(&state.db)
     .await
-    .map_err(|e| {
-        error!("Failed to look up magic link token: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: "Database error".to_string(),
-            }),
-        )
+    .map_err(internal)?;
+    let email = email.ok_or_else(|| bad("This sign-in link has expired or was already used. Please request a new one."))?;
+
+    let (user_id, is_committee, is_admin): (String, bool, bool) =
+        sqlx::query_as("SELECT id, is_committee, is_admin FROM users WHERE email = ?")
+            .bind(&email)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| bad("User not found"))?;
+
+    let token = create_jwt_token(&user_id, &state.jwt_secret).map_err(|e| {
+        error!("Failed to create JWT: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Failed to create token".to_string() }))
     })?;
 
-    let (_token_id, email, created_at) = token_record.ok_or_else(|| {
-        (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "Invalid or expired magic link".to_string(),
-            }),
+    Ok(Json(MagicLinkSession { token, user_id, is_committee, is_admin }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_util::{insert_user, test_state, user_with};
+
+    async fn issue(state: &AppState, email: &str, token: &str, age_minutes: i64) {
+        sqlx::query(
+            "INSERT INTO magic_link_tokens (id, email, token, created_at)
+             VALUES (?, ?, ?, datetime('now', ?))",
         )
-    })?;
-
-    // Check if token is less than 15 minutes old
-    let created = chrono::NaiveDateTime::parse_from_str(&created_at, "%Y-%m-%d %H:%M:%S")
-        .map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: "Invalid token timestamp".to_string(),
-                }),
-            )
-        })?;
-
-    let now = chrono::Utc::now().naive_utc();
-    let age = now.signed_duration_since(created);
-    if age.num_minutes() > 15 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "Magic link has expired. Please request a new one.".to_string(),
-            }),
-        ));
+        .bind(Uuid::new_v4().to_string())
+        .bind(email)
+        .bind(token)
+        .bind(format!("-{age_minutes} minutes"))
+        .execute(&state.db)
+        .await
+        .unwrap();
     }
 
-    // Look up user by email
-    let user: (String, bool, bool) = sqlx::query_as(
-        "SELECT id, is_committee, is_admin FROM users WHERE email = ?"
-    )
-    .bind(&email)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|_| {
-        (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "User not found".to_string(),
-            }),
-        )
-    })?;
+    async fn member_with_email(state: &AppState, email: &str) {
+        let user = user_with(true, true, true, true);
+        insert_user(&state.db, &user).await;
+        sqlx::query("UPDATE users SET email = ? WHERE id = ?")
+            .bind(email)
+            .bind(&user.id)
+            .execute(&state.db)
+            .await
+            .unwrap();
+    }
 
-    let (user_id, is_committee, is_admin) = user;
+    async fn redeem(state: &AppState, token: &str) -> Result<Json<MagicLinkSession>, (StatusCode, Json<ErrorResponse>)> {
+        redeem_magic_link(State(state.clone()), Json(MagicLinkVerifyQuery { token: token.to_string() })).await
+    }
 
-    // Create JWT
-    let jwt = create_jwt_token(&user_id, &state.jwt_secret).map_err(|e| {
-        error!("Failed to create JWT: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: "Failed to create token".to_string(),
-            }),
-        )
-    })?;
+    // Impact: mail scanners prefetch links in emails; if opening the link spent
+    // the token, members would find their sign-in link already used.
+    // Should: leave the token redeemable after the emailed link is opened.
+    #[tokio::test]
+    async fn opening_the_link_does_not_use_it_up() {
+        let state = test_state().await;
+        member_with_email(&state, "m@example.test").await;
+        issue(&state, "m@example.test", "tok", 0).await;
 
-    // Redirect to frontend callback
-    let redirect_url = format!(
-        "{}/auth/magic-link-callback?token={}&user_id={}&is_committee={}&is_admin={}",
-        state.public_url, jwt, user_id, is_committee, is_admin
-    );
+        let _ = verify_magic_link(State(state.clone()), Query(MagicLinkVerifyQuery { token: "tok".into() })).await;
 
-    Ok(Redirect::temporary(&redirect_url))
+        assert!(redeem(&state, "tok").await.is_ok());
+    }
+
+    // Impact: a leaked link (forwarded email, logs, history) must not mint sessions repeatedly.
+    // Should: sign in once per token.
+    // Should not: accept the same token a second time.
+    #[tokio::test]
+    async fn token_is_single_use() {
+        let state = test_state().await;
+        member_with_email(&state, "m@example.test").await;
+        issue(&state, "m@example.test", "tok", 0).await;
+
+        assert!(redeem(&state, "tok").await.is_ok());
+        let (status, _) = redeem(&state, "tok").await.expect_err("second use");
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    // Should not: accept a token more than 15 minutes old.
+    #[tokio::test]
+    async fn expired_token_is_refused() {
+        let state = test_state().await;
+        member_with_email(&state, "m@example.test").await;
+        issue(&state, "m@example.test", "tok", 16).await;
+
+        assert!(redeem(&state, "tok").await.is_err());
+    }
 }

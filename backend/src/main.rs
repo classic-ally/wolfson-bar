@@ -23,7 +23,7 @@ use axum::{
 };
 use routes::auth::{login_finish, login_start, register_finish, register_start, register_with_email, AppState};
 use routes::users::{get_me, accept_coc, upload_certificate, get_verification_token, update_display_name, submit_contract_request, get_my_overview, update_email, update_email_preferences, delete_my_account, export_my_data, accept_privacy, start_passkey_setup, finish_passkey_setup, get_rota_members};
-use routes::magic_link::{request_magic_link, verify_magic_link};
+use routes::magic_link::{redeem_magic_link, request_magic_link, verify_magic_link};
 use routes::admin::{get_pending_certificates, get_certificate, approve_certificate, verify_induction, get_active_members, get_unallocated_users, get_pending_contracts, approve_contract, get_bar_hours, update_bar_hours, get_overview_stats, get_all_users, promote_user, demote_user, delete_user, admin_mark_induction, admin_unmark_induction, admin_mark_coc, bulk_import_users, admin_upload_certificate, admin_set_contract, admin_clear_contract, admin_set_email, export_members_csv, export_shift_history_csv};
 use routes::induction::{set_induction_availability, remove_induction_availability, get_induction_dates, signup_for_induction, cancel_induction_signup, admin_mark_supervised, admin_unmark_supervised, get_pending_induction_approvals};
 use routes::kiosk::{pair_start, pair_approve, pair_status, pair_info, list_devices, revoke_device, get_checkin_code, check_in, get_bar_status, close_bar};
@@ -134,6 +134,7 @@ async fn main() {
         .route("/api/auth/register/email", post(register_with_email))
         .route("/api/auth/magic-link/request", post(request_magic_link))
         .route("/api/auth/magic-link/verify", get(verify_magic_link))
+        .route("/api/auth/magic-link/redeem", post(redeem_magic_link))
         .route("/api/admin/pending-certificates", get(get_pending_certificates))
         .route("/api/admin/certificate/:user_id", get(get_certificate))
         .route("/api/admin/approve-food-safety/:user_id", post(approve_certificate))

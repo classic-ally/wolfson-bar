@@ -142,7 +142,10 @@ fn validate_event(event: &Event) -> Result<(), (StatusCode, Json<ErrorResponse>)
         t[3..].parse::<u8>().map_or(false, |m| m < 60)
     }
 
-    if chrono::NaiveDate::parse_from_str(&event.event_date, "%Y-%m-%d").is_err() {
+    // Exactly YYYY-MM-DD: shifts match events on the date string.
+    let canonical = chrono::NaiveDate::parse_from_str(&event.event_date, "%Y-%m-%d")
+        .map(|d| d.format("%Y-%m-%d").to_string());
+    if canonical.as_deref() != Ok(event.event_date.as_str()) {
         return Err(bad("Invalid date format. Use YYYY-MM-DD"));
     }
     if event.start_time.as_deref().is_some_and(|t| !valid_time(t)) {

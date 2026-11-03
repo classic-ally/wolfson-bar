@@ -7,9 +7,8 @@ use axum_extra::extract::Multipart;
 use serde::{Deserialize, Serialize};
 use tracing::{info, error};
 use ts_rs::TS;
-use jsonwebtoken::{encode, EncodingKey, Header};
 
-use crate::auth::{AuthenticatedUser, Claims};
+use crate::auth::{create_purpose_token, AuthenticatedUser};
 use crate::models::{ErrorResponse, IS_ROTA_MEMBER_SQL};
 use crate::routes::coc::{current_coc_version, record_signature};
 use crate::routes::auth::AppState;
@@ -316,34 +315,17 @@ pub async fn get_verification_token(
 
     info!("🎫 Generating {} verification token for user: {}", params.verification_type, user.id);
 
-    // Create claims with short expiry (5 minutes)
-    let now = chrono::Utc::now().timestamp() as usize;
-    let expiration = chrono::Utc::now()
-        .checked_add_signed(chrono::Duration::minutes(5))
-        .expect("valid timestamp")
-        .timestamp() as usize;
-
-    let claims = Claims {
-        sub: user.id.clone(),
-        exp: expiration,
-        iat: now,
-    };
-
-    // Encode verification type in the token
-    let token = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(&state.jwt_secret),
-    )
-    .map_err(|e| {
-        error!("❌ Failed to create token: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: "Failed to create verification token".to_string(),
-            }),
-        )
-    })?;
+    // Short-lived and only valid as proof for this verification, never as a session.
+    let token = create_purpose_token(&user.id, &params.verification_type, 5 * 60, &state.jwt_secret)
+        .map_err(|e| {
+            error!("❌ Failed to create token: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to create verification token".to_string(),
+                }),
+            )
+        })?;
 
     // Encode type in token data (we'll pass it separately in the QR)
     let token_with_type = format!("{}:{}", params.verification_type, token);

@@ -613,6 +613,29 @@ export async function getTermWeeks(): Promise<TermWeek[]> {
 
 
 /**
+ * Redeem a single-use magic link token for a session and store it.
+ */
+export async function redeemMagicLink(token: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/auth/magic-link/redeem`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new AuthError(error.error || 'Failed to sign in')
+  }
+
+  const session: { token: string; user_id: string; is_committee: boolean; is_admin: boolean } =
+    await response.json()
+  localStorage.setItem('auth_token', session.token)
+  localStorage.setItem('user_id', session.user_id)
+  localStorage.setItem('is_committee', session.is_committee.toString())
+  localStorage.setItem('is_admin', session.is_admin.toString())
+}
+
+/**
  * Get shift information for date range (authenticated)
  */
 export async function getShifts(startDate: string, endDate: string): Promise<ShiftInfo[]> {

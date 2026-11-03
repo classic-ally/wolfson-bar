@@ -17,18 +17,49 @@ pub struct Claims {
     pub sub: String, // user_id
     pub exp: usize,  // expiry timestamp
     pub iat: usize,  // issued at
+    /// Set on single-purpose tokens (e.g. a QR shown for induction). Absent on
+    /// session tokens; a token with a purpose is never accepted as a session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
+}
+
+fn now_secs() -> usize {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as usize
+}
+
+fn decode_claims(token: &str, secret: &[u8]) -> Result<Claims, jsonwebtoken::errors::Error> {
+    Ok(decode::<Claims>(token, &DecodingKey::from_secret(secret), &Validation::default())?.claims)
+}
+
+/// A short-lived token that only proves `user_id` for one `purpose`.
+pub fn create_purpose_token(user_id: &str, purpose: &str, ttl_secs: usize, secret: &[u8]) -> Result<String, jsonwebtoken::errors::Error> {
+    let now = now_secs();
+    let claims = Claims {
+        sub: user_id.to_string(),
+        exp: now + ttl_secs,
+        iat: now,
+        purpose: Some(purpose.to_string()),
+    };
+    encode(&Header::default(), &claims, &EncodingKey::from_secret(secret))
+}
+
+/// The user a purpose token was issued for, if it is valid and for `purpose`.
+pub fn verify_purpose_token(token: &str, purpose: &str, secret: &[u8]) -> Option<String> {
+    let claims = decode_claims(token, secret).ok()?;
+    (claims.purpose.as_deref() == Some(purpose)).then_some(claims.sub)
 }
 
 pub fn create_jwt_token(user_id: &str, secret: &[u8]) -> Result<String, jsonwebtoken::errors::Error> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as usize;
+    let now = now_secs();
 
     let claims = Claims {
         sub: user_id.to_string(),
         exp: now + 86400, // 24 hours
         iat: now,
+        purpose: None,
     };
 
     encode(
@@ -38,14 +69,13 @@ pub fn create_jwt_token(user_id: &str, secret: &[u8]) -> Result<String, jsonwebt
     )
 }
 
+/// Verify a session token. Single-purpose tokens are rejected.
 pub fn verify_jwt_token(token: &str, secret: &[u8]) -> Result<Claims, jsonwebtoken::errors::Error> {
-    let token_data = decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(secret),
-        &Validation::default(),
-    )?;
-
-    Ok(token_data.claims)
+    let claims = decode_claims(token, secret)?;
+    if claims.purpose.is_some() {
+        return Err(jsonwebtoken::errors::ErrorKind::InvalidToken.into());
+    }
+    Ok(claims)
 }
 
 // Helper to extract user_id from Authorization header
@@ -227,4 +257,31 @@ async fn extract_user_from_request(
         })?;
 
     Ok(user)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SECRET: &[u8] = &[1u8; 32];
+
+    // Impact: the induction QR is shown on a phone screen; if it were a session
+    // token, anyone who photographed it could act as the member.
+    // Should not: accept a single-purpose token as a session.
+    #[test]
+    fn purpose_token_is_not_a_session() {
+        let qr = create_purpose_token("member", "induction", 300, SECRET).unwrap();
+        assert!(verify_jwt_token(&qr, SECRET).is_err());
+    }
+
+    // Should: accept a purpose token only for its own purpose.
+    // Should not: accept a session token as proof for a purpose.
+    #[test]
+    fn purpose_token_only_proves_its_purpose() {
+        let qr = create_purpose_token("member", "induction", 300, SECRET).unwrap();
+        assert_eq!(verify_purpose_token(&qr, "induction", SECRET).as_deref(), Some("member"));
+        assert_eq!(verify_purpose_token(&qr, "food_safety", SECRET), None);
+        let session = create_jwt_token("member", SECRET).unwrap();
+        assert_eq!(verify_purpose_token(&session, "induction", SECRET), None);
+    }
 }

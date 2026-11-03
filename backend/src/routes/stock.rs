@@ -1,12 +1,12 @@
 use axum::{
     extract::{State, Path},
-    http::{StatusCode, HeaderMap},
+    http::StatusCode,
     Json,
 };
 use serde::{Deserialize, Serialize};
 use tracing::{info, error};
 
-use crate::auth::extract_user_id_from_header;
+use crate::auth::CommitteeUser;
 use crate::models::ErrorResponse;
 use crate::routes::auth::AppState;
 
@@ -28,7 +28,8 @@ pub struct ProductWithStock {
     pub name: String,
     pub description: Option<String>,
     pub category: String,
-    pub current_stock: i32,
+    // i64: the SUM of i32 changes can exceed i32.
+    pub current_stock: i64,
     pub last_unit_cost: Option<f64>,
     pub created_at: String,
     pub updated_at: String,
@@ -73,12 +74,18 @@ pub struct TransactionResponse {
     pub transactions_created: usize,
 }
 
+/// Largest stock change accepted in one transaction line, either direction.
+const MAX_QUANTITY_CHANGE: i32 = 100_000;
+/// Most lines accepted in one bulk transaction request.
+const MAX_TRANSACTIONS: usize = 500;
+
 // ===== Route Handlers =====
 
 // POST /api/admin/stock/products/:id
 // Create a new product with specified PoS ID
 pub async fn create_product(
     State(state): State<AppState>,
+    CommitteeUser(_): CommitteeUser,
     Path(id): Path<i32>,
     Json(req): Json<CreateProductRequest>,
 ) -> Result<Json<Product>, (StatusCode, Json<ErrorResponse>)> {
@@ -151,6 +158,7 @@ pub async fn create_product(
 // Look up product by barcode with stock information
 pub async fn lookup_barcode(
     State(state): State<AppState>,
+    CommitteeUser(_): CommitteeUser,
     Path(barcode): Path<String>,
 ) -> Result<Json<ProductWithStock>, (StatusCode, Json<ErrorResponse>)> {
     info!("🔍 Looking up barcode: {}", barcode);
@@ -207,6 +215,7 @@ pub async fn lookup_barcode(
 // Link a barcode to a product
 pub async fn add_barcode(
     State(state): State<AppState>,
+    CommitteeUser(_): CommitteeUser,
     Path(product_id): Path<i32>,
     Json(req): Json<AddBarcodeRequest>,
 ) -> Result<Json<ProductBarcode>, (StatusCode, Json<ErrorResponse>)> {
@@ -303,24 +312,24 @@ pub async fn add_barcode(
 // Create bulk stock transactions (purchases, removals, adjustments)
 pub async fn create_transactions(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    CommitteeUser(user): CommitteeUser,
     Json(req): Json<CreateTransactionsRequest>,
 ) -> Result<Json<TransactionResponse>, (StatusCode, Json<ErrorResponse>)> {
     info!("📝 Creating {} stock transactions", req.transactions.len());
 
-    // Extract user ID from auth header
-    let auth_header = headers.get("authorization")
-        .and_then(|h| h.to_str().ok());
-
-    let user_id = extract_user_id_from_header(auth_header, &state.jwt_secret).ok_or_else(|| {
-        error!("Unauthorized access to create_transactions");
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: "Unauthorized".to_string(),
-            }),
-        )
-    })?;
+    let bad = |error: String| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error }));
+    if req.transactions.len() > MAX_TRANSACTIONS {
+        return Err(bad(format!("At most {MAX_TRANSACTIONS} transactions per request")));
+    }
+    for item in &req.transactions {
+        if item.quantity.unsigned_abs() > MAX_QUANTITY_CHANGE as u32 {
+            return Err(bad(format!("Quantity must be between -{MAX_QUANTITY_CHANGE} and {MAX_QUANTITY_CHANGE}")));
+        }
+        if item.unit_cost.is_some_and(|c| !c.is_finite() || c < 0.0) {
+            return Err(bad("Unit cost must be a non-negative number".to_string()));
+        }
+    }
+    let user_id = user.id;
 
     // Start a transaction
     let mut tx = state.db.begin().await.map_err(|e| {
@@ -407,6 +416,7 @@ pub async fn create_transactions(
 // List all products with current stock levels
 pub async fn get_products(
     State(state): State<AppState>,
+    CommitteeUser(_): CommitteeUser,
 ) -> Result<Json<Vec<ProductWithStock>>, (StatusCode, Json<ErrorResponse>)> {
     info!("📋 Fetching all products with stock levels");
 
@@ -441,4 +451,48 @@ pub async fn get_products(
 
     info!("✅ Fetched {} products", products.len());
     Ok(Json(products))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_util::{get_req, insert_user, test_state, token_for, user_with};
+    use axum::routing::get;
+    use axum::Router;
+    use tower::ServiceExt;
+
+    // Impact: stock routes had no auth check, so anyone could read costs and
+    // change products and barcodes.
+    // Should: refuse the stock list to anonymous callers and to members who aren't on the committee.
+    #[tokio::test]
+    async fn stock_requires_committee() {
+        let state = test_state().await;
+        let member = user_with(true, true, true, true);
+        insert_user(&state.db, &member).await;
+        let app = Router::new()
+            .route("/api/admin/stock/products", get(get_products))
+            .with_state(state.clone());
+
+        let anon = app.clone().oneshot(get_req("/api/admin/stock/products", None, None)).await.unwrap();
+        assert_eq!(anon.status(), StatusCode::UNAUTHORIZED);
+        let token = token_for(&state, &member);
+        let res = app.oneshot(get_req("/api/admin/stock/products", Some(&token), None)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    }
+
+    // Should: reject a stock change outside the allowed quantity range.
+    #[tokio::test]
+    async fn oversized_quantity_is_refused() {
+        let state = test_state().await;
+        let mut committee = user_with(true, true, true, true);
+        committee.is_committee = true;
+        let req = CreateTransactionsRequest {
+            transactions: vec![TransactionItem { product_id: 1, quantity: i32::MAX, unit_cost: None }],
+            notes: None,
+        };
+        let (status, _) = create_transactions(State(state), CommitteeUser(committee), Json(req))
+            .await
+            .expect_err("quantity out of range");
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
 }

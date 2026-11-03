@@ -195,9 +195,6 @@ pub async fn verify_induction(
     CommitteeUser(committee_user): CommitteeUser,
     Json(body): Json<VerificationRequest>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    use jsonwebtoken::{decode, DecodingKey, Validation};
-    use crate::auth::Claims;
-
     // Parse token format "induction:JWT"
     let parts: Vec<&str> = body.token.split(':').collect();
     if parts.len() != 2 {
@@ -221,23 +218,18 @@ pub async fn verify_induction(
         ));
     }
 
-    // Verify JWT and extract user_id
-    let token_data = decode::<Claims>(
-        jwt,
-        &DecodingKey::from_secret(&state.jwt_secret),
-        &Validation::default(),
-    )
-    .map_err(|e| {
-        error!("❌ Failed to verify token: {}", e);
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: "Invalid or expired token".to_string(),
-            }),
-        )
-    })?;
+    // Only an induction QR token is accepted, not a session or food-safety token.
+    let target_user_id = crate::auth::verify_purpose_token(jwt, "induction", &state.jwt_secret)
+        .ok_or_else(|| {
+            error!("❌ Invalid induction verification token");
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(ErrorResponse {
+                    error: "Invalid or expired token".to_string(),
+                }),
+            )
+        })?;
 
-    let target_user_id = token_data.claims.sub;
 
     info!("✅ Committee member {} verifying induction for user {}", committee_user.id, target_user_id);
 
