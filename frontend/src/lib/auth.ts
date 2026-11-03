@@ -812,9 +812,10 @@ export async function getMyOverview(): Promise<UserOverview> {
 // ===== Email & Privacy =====
 
 /**
- * Update user email
+ * Update user email. Clearing applies at once; a new address returns
+ * `pending: true` and only applies once confirmed from the link sent to it.
  */
-export async function updateEmail(email: string | null): Promise<void> {
+export async function updateEmail(email: string | null): Promise<{ pending: boolean }> {
   const response = await authenticatedFetch(`${API_BASE}/api/users/me/email`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -825,6 +826,7 @@ export async function updateEmail(email: string | null): Promise<void> {
     const error = await response.json()
     throw new AuthError(error.error || 'Failed to update email')
   }
+  return { pending: response.status === 202 }
 }
 
 /**

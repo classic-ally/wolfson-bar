@@ -1058,10 +1058,11 @@ pub async fn bulk_import_users(
     let mut details = Vec::new();
 
     for entry in &req.users {
-        let email = entry.email.trim().to_lowercase();
+        let normalized = crate::routes::magic_link::normalize_email(&entry.email);
+        let email = normalized.clone().unwrap_or_else(|| entry.email.trim().to_lowercase());
 
         // Validate email
-        if !email.contains('@') || email.starts_with('@') || email.ends_with('@') {
+        if normalized.is_none() {
             errors.push(format!("Invalid email: {}", email));
             details.push(BulkImportDetail {
                 email: email.clone(),
@@ -1277,9 +1278,20 @@ pub async fn admin_set_email(
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
     info!("📧 Admin {} setting email for user {}", admin.id, target_user_id);
 
-    let email = req.email.trim().to_lowercase();
-    if !email.contains('@') || !email.contains('.') {
-        return Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Invalid email address".to_string() })));
+    let email = crate::routes::magic_link::normalize_email(&req.email)
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Invalid email address".to_string() })))?;
+
+    let taken: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE email = ? AND id != ?)")
+        .bind(&email)
+        .bind(&target_user_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| {
+            error!("❌ Failed to check email: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Failed to set email".to_string() }))
+        })?;
+    if taken {
+        return Err((StatusCode::CONFLICT, Json(ErrorResponse { error: "Email address already in use".to_string() })));
     }
 
     let result = sqlx::query("UPDATE users SET email = ? WHERE id = ?")

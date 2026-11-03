@@ -14,7 +14,10 @@ use uuid::Uuid;
 use webauthn_rs::prelude::*;
 
 use crate::auth::create_jwt_token;
-use crate::routes::magic_link::{client_ip, email_throttle, issue_token, send_link_email, LinkEmail, Throttle};
+use crate::routes::magic_link::{
+    client_ip, email_throttle, issue_token, normalize_email, request_email_confirmation, send_link_email, LinkEmail,
+    Throttle, TokenUse,
+};
 use crate::models::{AuthResponse, ErrorResponse, RegisterStartRequest, User};
 
 /// Shared helper for creating a user in the database.
@@ -212,6 +215,8 @@ pub async fn register_start(
 // Registration Finish - Verify and store credential
 pub async fn register_finish(
     State(state): State<AppState>,
+    peer: Option<ConnectInfo<SocketAddr>>,
+    headers: HeaderMap,
     body: Result<Json<FinishRequest<RegisterPublicKeyCredential>>, JsonRejection>,
 ) -> Result<Json<AuthResponse>, (StatusCode, Json<ErrorResponse>)> {
     let req = finish_body(body)?;
@@ -228,7 +233,21 @@ pub async fn register_finish(
         })?;
 
     let passkey_json = serde_json::to_string(&passkey).map_err(internal)?;
-    let user = create_user_in_db(&state.db, Some(meta.name), meta.email, Some(passkey_json)).await?;
+    let user = create_user_in_db(&state.db, Some(meta.name), None, Some(passkey_json)).await?;
+
+    // The email is only set once confirmed, so nobody can claim an address they
+    // can't read. An address already on another account just isn't added.
+    if let Some(email) = meta.email.as_deref().and_then(normalize_email) {
+        let taken: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE email = ?)")
+            .bind(&email)
+            .fetch_one(&state.db)
+            .await
+            .map_err(internal)?;
+        if !taken {
+            let ip = peer.map(|ConnectInfo(addr)| client_ip(addr, &headers)).unwrap_or_default();
+            request_email_confirmation(&state, &email, &ip, &user.id).await?;
+        }
+    }
 
     let token = create_jwt_token(&user.id, &state.jwt_secret).map_err(internal)?;
 
@@ -323,15 +342,13 @@ pub async fn register_with_email(
     Json(req): Json<RegisterEmailRequest>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
     let display_name = req.display_name.trim().to_string();
-    let email = req.email.trim().to_lowercase();
 
     if display_name.is_empty() {
         return Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Display name is required".to_string() })));
     }
 
-    if !email.contains('@') || email.starts_with('@') || email.ends_with('@') {
-        return Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Invalid email address".to_string() })));
-    }
+    let email = normalize_email(&req.email)
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Invalid email address".to_string() })))?;
 
     let email_service = state.email_service.as_ref().ok_or_else(|| {
         (StatusCode::SERVICE_UNAVAILABLE, Json(ErrorResponse { error: "Email service not configured".to_string() }))
@@ -362,12 +379,12 @@ pub async fn register_with_email(
         .await
         .map_err(internal)?;
 
-    let (signup_name, kind) = if existing {
-        (None, LinkEmail::AlreadyRegistered)
+    let (use_, kind) = if existing {
+        (TokenUse::SignIn, LinkEmail::AlreadyRegistered)
     } else {
-        (Some(display_name.as_str()), LinkEmail::Welcome)
+        (TokenUse::SignUp { display_name: &display_name }, LinkEmail::Welcome)
     };
-    let token = issue_token(&state.db, &email, &ip, signup_name).await.map_err(internal)?;
+    let token = issue_token(&state.db, &email, &ip, use_).await.map_err(internal)?;
     send_link_email(&state, email_service, &email, &token, kind).await;
 
     Ok(StatusCode::OK)
@@ -569,7 +586,9 @@ mod passkey_tests {
 
     // Impact: finish used to read the most recent registration challenge from anyone,
     // so overlapping sign-ups failed or were stored under another person's name and email.
-    // Should: create each member with the name and email they registered with, even when sign-ups overlap.
+    // Should: create each member with the name they registered with, and send their
+    // email for confirmation against their own account, even when sign-ups overlap.
+    // Should not: set the email before it is confirmed.
     #[tokio::test]
     async fn concurrent_registrations_each_use_their_own_challenge() {
         let state = test_state().await;
@@ -586,8 +605,14 @@ mod passkey_tests {
         assert_eq!(res.status(), StatusCode::OK);
         let bob_id = body_json(res).await["user_id"].as_str().unwrap().to_string();
 
-        assert_eq!(stored_member(&state, &alice_id).await, (Some("Alice".into()), Some("alice@example.com".into())));
-        assert_eq!(stored_member(&state, &bob_id).await, (Some("Bob".into()), Some("bob@example.com".into())));
+        assert_eq!(stored_member(&state, &alice_id).await, (Some("Alice".into()), None));
+        assert_eq!(stored_member(&state, &bob_id).await, (Some("Bob".into()), None));
+        let pending: Vec<(String, String)> =
+            sqlx::query_as("SELECT email, user_id FROM magic_link_tokens WHERE user_id IS NOT NULL ORDER BY email")
+                .fetch_all(&state.db)
+                .await
+                .unwrap();
+        assert_eq!(pending, [("alice@example.com".into(), alice_id), ("bob@example.com".into(), bob_id)]);
     }
 
     // Should not: create a second account from a registration challenge that was already used.

@@ -21,6 +21,8 @@ pub(crate) const MIGRATIONS: &[(&str, &str, &[&str])] = &[
     ("018_membership_email_log", include_str!("../migrations/018_membership_email_log.sql"), &["already exists"]),
     ("019_shift_slots", include_str!("../migrations/019_shift_slots.sql"), &["duplicate column"]),
     ("020_pending_signups", include_str!("../migrations/020_pending_signups.sql"), &["duplicate column"]),
+    ("021_email_confirmation", include_str!("../migrations/021_email_confirmation.sql"), &["duplicate column"]),
+    ("022_unique_emails", include_str!("../migrations/022_unique_emails.sql"), &["UNIQUE constraint failed"]),
 ];
 
 pub async fn run_migrations(db: &SqlitePool) {
@@ -31,6 +33,11 @@ pub async fn run_migrations(db: &SqlitePool) {
         }
         match sqlx::query(sql).execute(db).await {
             Ok(_) => tracing::info!("Migration {} applied", name),
+            Err(e) if e.to_string().contains("UNIQUE constraint failed")
+                && ignorable_errors.contains(&"UNIQUE constraint failed") =>
+            {
+                tracing::warn!("Migration {} incomplete, will retry next start: {}", name, e);
+            }
             Err(e) if ignorable_errors.iter().any(|ie| e.to_string().contains(ie)) => {
                 tracing::info!("Migration {} already applied", name);
             }
@@ -322,5 +329,39 @@ mod backfill_tests {
             rows,
             vec![("2026-06-19".to_string(), String::new(), Some("2026-06-19 19:40:00".to_string()))]
         );
+    }
+
+    // Impact: production may already hold accounts sharing an address; the unique
+    // index must not stop the server starting, and must arrive once they're fixed.
+    // Should: lowercase stored emails and start up even when two accounts share one.
+    // Should: add the unique index on a later start, once the duplicates are gone.
+    #[tokio::test]
+    async fn unique_email_index_waits_for_duplicates_to_clear() {
+        let url = "sqlite:file:unique_emails_022_test?mode=memory&cache=shared";
+        let db = SqlitePoolOptions::new().max_connections(5).connect(url).await.unwrap();
+        for (_, sql, _) in super::MIGRATIONS.iter().take_while(|(name, ..)| *name != "022_unique_emails") {
+            let _ = sqlx::query(sql).execute(&db).await;
+        }
+        sqlx::query(
+            "INSERT INTO users (id, created_at, email) VALUES ('a', '', 'Same@Example.com'), ('b', '', 'same@example.com ')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let index_exists = || async {
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sqlite_master WHERE name = 'idx_users_email_unique'")
+                .fetch_one(&db)
+                .await
+                .unwrap()
+        };
+
+        super::run_migrations(&db).await;
+        assert_eq!(index_exists().await, 0);
+        let emails: Vec<String> = sqlx::query_scalar("SELECT email FROM users ORDER BY id").fetch_all(&db).await.unwrap();
+        assert_eq!(emails, ["same@example.com", "same@example.com"]);
+
+        sqlx::query("UPDATE users SET email = NULL WHERE id = 'b'").execute(&db).await.unwrap();
+        super::run_migrations(&db).await;
+        assert_eq!(index_exists().await, 1);
     }
 }

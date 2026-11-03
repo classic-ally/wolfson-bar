@@ -9,6 +9,8 @@ export default function UserProfile() {
   const [editingName, setEditingName] = useState(false)
   const [newDisplayName, setNewDisplayName] = useState('')
   const [editingEmail, setEditingEmail] = useState(false)
+  // Address awaiting confirmation from the link sent to it.
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null)
   const [newEmail, setNewEmail] = useState('')
   const [contractExpiryDate, setContractExpiryDate] = useState('')
   const [submittingContract, setSubmittingContract] = useState(false)
@@ -57,7 +59,8 @@ export default function UserProfile() {
   const handleUpdateEmail = async () => {
     const trimmed = newEmail.trim()
     try {
-      await updateEmail(trimmed || null)
+      const { pending } = await updateEmail(trimmed || null)
+      setPendingEmail(pending ? trimmed : null)
       setEditingEmail(false)
       setNewEmail('')
       loadStatus()
@@ -316,6 +319,11 @@ export default function UserProfile() {
                   Edit
                 </button>
               </div>
+            )}
+            {pendingEmail && !editingEmail && (
+              <p style={{ fontSize: '13px', color: '#004085', backgroundColor: '#cce5ff', padding: '8px', borderRadius: '4px', margin: '8px 0' }}>
+                We've sent a link to <strong>{pendingEmail}</strong>. Click it to start using that address.
+              </p>
             )}
             <span style={{ fontSize: '12px', color: '#888' }}>
               Used for magic link sign-in and the emails you choose below.

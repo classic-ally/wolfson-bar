@@ -26,6 +26,21 @@ pub struct MagicLinkVerifyQuery {
     pub token: String,
 }
 
+/// An email address trimmed and lowercased, if it looks deliverable. Emails are
+/// stored in this form and compared exactly.
+pub fn normalize_email(raw: &str) -> Option<String> {
+    let email = raw.trim().to_lowercase();
+    let (local, domain) = email.split_once('@')?;
+    let valid = !local.is_empty()
+        && domain.contains('.')
+        && !domain.starts_with('.')
+        && !domain.ends_with('.')
+        && !domain.contains('@')
+        && email.len() <= 254
+        && !email.chars().any(|c| c.is_whitespace() || c.is_control());
+    valid.then_some(email)
+}
+
 /// Emails per hour to any one address, across sign-in and sign-up links.
 const PER_EMAIL_PER_HOUR: i64 = 3;
 /// Emails per hour requested from one client IP (generous: eduroam is one NAT).
@@ -96,19 +111,35 @@ pub fn client_ip(addr: SocketAddr, headers: &HeaderMap) -> String {
     addr.ip().to_string()
 }
 
-/// Store a new single-use link token. With `display_name`, redeeming it creates
-/// the account (an email sign-up); without, it signs into an existing one.
-pub async fn issue_token(db: &SqlitePool, email: &str, ip: &str, display_name: Option<&str>) -> Result<String, sqlx::Error> {
+/// What redeeming a link token does.
+pub enum TokenUse<'a> {
+    /// Sign into the account with this email.
+    SignIn,
+    /// Create an account with this display name (an email sign-up).
+    SignUp { display_name: &'a str },
+    /// Set this email on the given account, once its owner proves they read it.
+    Confirm { user_id: &'a str },
+}
+
+/// Store a new single-use link token for `email`.
+pub async fn issue_token(db: &SqlitePool, email: &str, ip: &str, use_: TokenUse<'_>) -> Result<String, sqlx::Error> {
     let token_bytes: [u8; 32] = rand::random();
     let token = base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, token_bytes);
+    let (display_name, user_id) = match use_ {
+        TokenUse::SignIn => (None, None),
+        TokenUse::SignUp { display_name } => (Some(display_name), None),
+        TokenUse::Confirm { user_id } => (None, Some(user_id)),
+    };
     sqlx::query(
-        "INSERT INTO magic_link_tokens (id, email, token, ip_address, display_name) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO magic_link_tokens (id, email, token, ip_address, display_name, user_id)
+         VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(Uuid::new_v4().to_string())
     .bind(email)
     .bind(&token)
     .bind(ip)
     .bind(display_name)
+    .bind(user_id)
     .execute(db)
     .await?;
     // Tokens older than the rate-limit window are no longer needed.
@@ -126,6 +157,8 @@ pub enum LinkEmail {
     AlreadyRegistered,
     /// Sign-up for a new address: redeeming the link creates the account.
     Welcome,
+    /// A member added this address to their account; redeeming confirms it.
+    ConfirmEmail,
 }
 
 pub async fn send_link_email(state: &AppState, email_service: &EmailService, email: &str, token: &str, kind: LinkEmail) {
@@ -147,6 +180,10 @@ pub async fn send_link_email(state: &AppState, email_service: &EmailService, ema
             "Welcome to Wolfson Cellar Bar",
             "<h2>Welcome to Wolfson Cellar Bar!</h2><p>Click below to confirm your email and finish creating your account. This link expires in 15 minutes.</p>",
         ),
+        LinkEmail::ConfirmEmail => (
+            "Confirm your email for Wolfson Cellar Bar",
+            "<h2>Confirm your email</h2><p>Click below to use this address for your Wolfson Cellar Bar account. This link expires in 15 minutes.</p>",
+        ),
     };
     let html = format!(
         r#"{}{}<p style="color: #666; font-size: 12px;">If you didn't request this, you can safely ignore this email.</p>"#,
@@ -163,6 +200,29 @@ fn throttle_error(e: sqlx::Error) -> (StatusCode, Json<ErrorResponse>) {
     (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Database error".to_string() }))
 }
 
+/// Send `user_id` a link to confirm `email` as their address. The address is
+/// only set on their account when the link is redeemed.
+pub async fn request_email_confirmation(
+    state: &AppState,
+    email: &str,
+    ip: &str,
+    user_id: &str,
+) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    match throttle_for(&state.db, email, ip).await.map_err(throttle_error)? {
+        Throttle::Refuse(msg) => {
+            return Err((StatusCode::TOO_MANY_REQUESTS, Json(ErrorResponse { error: msg.to_string() })));
+        }
+        Throttle::Skip => return Ok(()),
+        Throttle::Send => {}
+    }
+    let token = issue_token(&state.db, email, ip, TokenUse::Confirm { user_id }).await.map_err(throttle_error)?;
+    match &state.email_service {
+        Some(svc) => send_link_email(state, svc, email, &token, LinkEmail::ConfirmEmail).await,
+        None => error!("Email confirmation requested but email service not configured"),
+    }
+    Ok(())
+}
+
 /// Request a magic link login email
 pub async fn request_magic_link(
     State(state): State<AppState>,
@@ -172,6 +232,7 @@ pub async fn request_magic_link(
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
     let email = req.email.trim().to_lowercase();
     info!("Magic link requested");
+    // A link only goes out to an address an account has, which is never invalid.
 
     let email_service = state.email_service.as_ref().ok_or_else(|| {
         error!("Magic link requested but email service not configured");
@@ -197,7 +258,7 @@ pub async fn request_magic_link(
         return Ok(StatusCode::OK);
     }
 
-    let token = issue_token(&state.db, &email, &ip, None).await.map_err(|e| {
+    let token = issue_token(&state.db, &email, &ip, TokenUse::SignIn).await.map_err(|e| {
         error!("Failed to store magic link token: {}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Failed to create magic link".to_string() }))
     })?;
@@ -246,17 +307,40 @@ pub async fn redeem_magic_link(
     };
 
     // Claim the token atomically so two concurrent redemptions can't both succeed.
-    let claimed: Option<(String, Option<String>)> = sqlx::query_as(
+    let claimed: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
         "UPDATE magic_link_tokens SET used = TRUE
          WHERE token = ? AND NOT used AND created_at >= datetime('now', '-15 minutes')
-         RETURNING email, display_name",
+         RETURNING email, display_name, user_id",
     )
     .bind(&req.token)
     .fetch_optional(&state.db)
     .await
     .map_err(internal)?;
-    let (email, signup_name) =
+    let (email, signup_name, confirm_for) =
         claimed.ok_or_else(|| bad("This sign-in link has expired or was already used. Please request a new one."))?;
+
+    // An email confirmation: the owner has proven they read this address, so set it.
+    if let Some(user_id) = confirm_for {
+        let taken: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE email = ? AND id != ?)")
+            .bind(&email)
+            .bind(&user_id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(internal)?;
+        if taken {
+            return Err(bad("This email address is now used by another account."));
+        }
+        let updated = sqlx::query("UPDATE users SET email = ? WHERE id = ?")
+            .bind(&email)
+            .bind(&user_id)
+            .execute(&state.db)
+            .await
+            .map_err(internal)?;
+        if updated.rows_affected() == 0 {
+            return Err(bad("User not found"));
+        }
+        info!("📧 Confirmed new email for user {}", user_id);
+    }
 
     let existing: Option<(String, bool, bool)> =
         sqlx::query_as("SELECT id, is_committee, is_admin FROM users WHERE email = ?")
@@ -376,13 +460,13 @@ mod tests {
     async fn email_limits_per_address_and_site_wide() {
         let state = test_state().await;
         for _ in 0..PER_EMAIL_PER_HOUR {
-            issue_token(&state.db, "a@example.test", "192.0.2.1", None).await.unwrap();
+            issue_token(&state.db, "a@example.test", "192.0.2.1", TokenUse::SignIn).await.unwrap();
         }
         assert_eq!(email_throttle(&state.db, "a@example.test", "192.0.2.9").await.unwrap(), Throttle::Skip);
         assert_eq!(email_throttle(&state.db, "b@example.test", "192.0.2.9").await.unwrap(), Throttle::Send);
 
         for i in PER_EMAIL_PER_HOUR..SITE_PER_HOUR {
-            issue_token(&state.db, &format!("{i}@example.test"), &format!("198.51.100.{}", i % 200), None)
+            issue_token(&state.db, &format!("{i}@example.test"), &format!("198.51.100.{}", i % 200), TokenUse::SignIn)
                 .await
                 .unwrap();
         }
@@ -399,7 +483,7 @@ mod tests {
     #[tokio::test]
     async fn signup_creates_the_account_on_redeem() {
         let state = test_state().await;
-        let token = issue_token(&state.db, "new@example.test", "192.0.2.1", Some("New Member")).await.unwrap();
+        let token = issue_token(&state.db, "new@example.test", "192.0.2.1", TokenUse::SignUp { display_name: "New Member" }).await.unwrap();
         let count = || async {
             sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE email = 'new@example.test'")
                 .fetch_one(&state.db)
@@ -417,5 +501,54 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(name.as_deref(), Some("New Member"));
+    }
+
+    // Impact: an unconfirmed address let anyone take over another person's future
+    // sign-ins by putting that person's email on their own account first.
+    // Should: set a member's new email only when the link sent to it is redeemed.
+    #[tokio::test]
+    async fn email_change_applies_on_confirmation() {
+        let state = test_state().await;
+        let member = user_with(true, true, true, true);
+        insert_user(&state.db, &member).await;
+        let token = issue_token(&state.db, "new@example.test", "", TokenUse::Confirm { user_id: &member.id })
+            .await
+            .unwrap();
+        let email = || async {
+            sqlx::query_scalar::<_, Option<String>>("SELECT email FROM users WHERE id = ?")
+                .bind(&member.id)
+                .fetch_one(&state.db)
+                .await
+                .unwrap()
+        };
+        assert_eq!(email().await, None);
+
+        let Json(session) = redeem(&state, &token).await.unwrap();
+
+        assert_eq!(session.user_id, member.id);
+        assert_eq!(email().await.as_deref(), Some("new@example.test"));
+    }
+
+    // Should not: confirm an address another account took in the meantime.
+    #[tokio::test]
+    async fn email_change_refused_if_taken_meanwhile() {
+        let state = test_state().await;
+        let member = user_with(true, true, true, true);
+        insert_user(&state.db, &member).await;
+        member_with_email(&state, "new@example.test").await;
+        let token = issue_token(&state.db, "new@example.test", "", TokenUse::Confirm { user_id: &member.id })
+            .await
+            .unwrap();
+
+        assert!(redeem(&state, &token).await.is_err());
+    }
+
+    // Should: store emails trimmed and lowercase, rejecting ones without a usable domain.
+    #[test]
+    fn emails_are_normalized() {
+        assert_eq!(normalize_email("  Alice@Example.COM ").as_deref(), Some("alice@example.com"));
+        for bad in ["alice", "@example.com", "alice@example", "alice@.com", "a b@example.com", "a@b@example.com"] {
+            assert_eq!(normalize_email(bad), None, "{bad}");
+        }
     }
 }

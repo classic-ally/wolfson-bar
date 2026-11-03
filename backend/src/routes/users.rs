@@ -1,6 +1,6 @@
 use axum::{
-    extract::{State, Query},
-    http::StatusCode,
+    extract::{ConnectInfo, State, Query},
+    http::{HeaderMap, StatusCode},
     Json,
 };
 use axum_extra::extract::Multipart;
@@ -12,7 +12,9 @@ use crate::auth::{create_purpose_token, AuthenticatedUser};
 use crate::models::{ErrorResponse, IS_ROTA_MEMBER_SQL};
 use crate::routes::coc::{current_coc_version, record_signature};
 use crate::routes::auth::AppState;
+use crate::routes::magic_link::{client_ip, normalize_email, request_email_confirmation};
 use crate::slots::SLOT_TITLE_SQL;
+use std::net::SocketAddr;
 
 #[derive(Debug, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -484,73 +486,18 @@ pub struct UpdateEmailRequest {
     pub email: Option<String>,
 }
 
-/// Update user's email address
+/// Update user's email address. Clearing takes effect at once; a new address
+/// is only set once the member confirms it from the link sent there, so
+/// nobody can put an address they can't read on their account.
 pub async fn update_email(
     State(state): State<AppState>,
     AuthenticatedUser(user): AuthenticatedUser,
+    peer: Option<ConnectInfo<SocketAddr>>,
+    headers: HeaderMap,
     Json(req): Json<UpdateEmailRequest>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    // Validate email format if provided
-    if let Some(ref email) = req.email {
-        let trimmed = email.trim();
-        if trimmed.is_empty() {
-            // Clear email
-            sqlx::query("UPDATE users SET email = NULL, email_notifications_enabled = FALSE, email_membership = FALSE WHERE id = ?")
-                .bind(&user.id)
-                .execute(&state.db)
-                .await
-                .map_err(|e| {
-                    error!("Failed to clear email: {}", e);
-                    (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Failed to update email".to_string() }))
-                })?;
-            return Ok(StatusCode::OK);
-        }
-
-        // Basic email validation: must contain @ with something on each side
-        if !trimmed.contains('@') || trimmed.starts_with('@') || trimmed.ends_with('@') {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse { error: "Invalid email address".to_string() }),
-            ));
-        }
-
-        // Check domain has at least one dot
-        let parts: Vec<&str> = trimmed.split('@').collect();
-        if parts.len() != 2 || !parts[1].contains('.') {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse { error: "Invalid email address".to_string() }),
-            ));
-        }
-
-        // Check uniqueness
-        let existing: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM users WHERE email = ? AND id != ?)"
-        )
-        .bind(trimmed)
-        .bind(&user.id)
-        .fetch_one(&state.db)
-        .await
-        .unwrap_or(false);
-
-        if existing {
-            return Err((
-                StatusCode::CONFLICT,
-                Json(ErrorResponse { error: "Email address already in use".to_string() }),
-            ));
-        }
-
-        info!("Updating email for user {}", user.id);
-        sqlx::query("UPDATE users SET email = ? WHERE id = ?")
-            .bind(trimmed)
-            .bind(&user.id)
-            .execute(&state.db)
-            .await
-            .map_err(|e| {
-                error!("Failed to update email: {}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Failed to update email".to_string() }))
-            })?;
-    } else {
+    let requested = req.email.as_deref().map(str::trim).filter(|e| !e.is_empty());
+    let Some(requested) = requested else {
         // Clear email and disable notifications
         sqlx::query("UPDATE users SET email = NULL, email_notifications_enabled = FALSE, email_membership = FALSE WHERE id = ?")
             .bind(&user.id)
@@ -560,9 +507,33 @@ pub async fn update_email(
                 error!("Failed to clear email: {}", e);
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Failed to update email".to_string() }))
             })?;
+        return Ok(StatusCode::OK);
+    };
+
+    let email = normalize_email(requested).ok_or_else(|| {
+        (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Invalid email address".to_string() }))
+    })?;
+    if user.email.as_deref() == Some(email.as_str()) {
+        return Ok(StatusCode::OK);
     }
 
-    Ok(StatusCode::OK)
+    let existing: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE email = ? AND id != ?)")
+        .bind(&email)
+        .bind(&user.id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(false);
+    if existing {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(ErrorResponse { error: "Email address already in use".to_string() }),
+        ));
+    }
+
+    info!("Sending email confirmation for user {}", user.id);
+    let ip = peer.map(|ConnectInfo(addr)| client_ip(addr, &headers)).unwrap_or_default();
+    request_email_confirmation(&state, &email, &ip, &user.id).await?;
+    Ok(StatusCode::ACCEPTED)
 }
 
 /// Partial update: omitted categories keep their current setting.
