@@ -227,14 +227,11 @@ pub struct PairStartResponse {
 
 /// Best-effort requester address for the approval screen: the first
 /// `X-Forwarded-For` hop when behind a proxy, else the socket peer. Display only.
+/// The pairing device's IP, shown to the approver. Only trusts
+/// `X-Forwarded-For` from the local reverse proxy, so a device can't spoof the
+/// bar's address.
 fn client_ip(headers: &HeaderMap, peer: Option<SocketAddr>) -> Option<String> {
-    headers
-        .get("x-forwarded-for")
-        .and_then(|h| h.to_str().ok())
-        .and_then(|v| v.split(',').next())
-        .map(|ip| ip.trim().to_string())
-        .filter(|ip| !ip.is_empty())
-        .or_else(|| peer.map(|p| p.ip().to_string()))
+    peer.map(|addr| crate::routes::magic_link::client_ip(addr, headers))
 }
 
 /// Device begins enrolment: posts the hash of a token it generated and keeps.
@@ -1152,16 +1149,21 @@ mod tests {
         assert_eq!(res.status(), Status::TOO_MANY_REQUESTS);
     }
 
+    // Impact: the approver trusts the shown IP to tell the bar PC from an
+    // attacker's device, so a client-supplied X-Forwarded-For must not count.
     // Should: show the approver where the pairing came from and how many kiosks it will replace.
+    // Should not: show an address the device itself put in X-Forwarded-For.
     #[tokio::test]
     async fn pair_info_reports_requester_and_active_devices() {
         let state = test_state().await;
         enroll_device(&state, "current-pc").await;
+        // Via the local reverse proxy: a forged first entry, then the address the proxy appended.
         let req = axum::http::Request::builder()
             .method("POST")
             .uri("/api/kiosk/pair/start")
+            .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 40000))))
             .header("content-type", "application/json")
-            .header("x-forwarded-for", "203.0.113.7, 10.0.0.1")
+            .header("x-forwarded-for", "198.51.100.66, 203.0.113.7")
             .header("user-agent", "KioskBrowser/1.0")
             .body(axum::body::Body::from(
                 serde_json::json!({ "token_hash": hash_token("new-pc") }).to_string(),

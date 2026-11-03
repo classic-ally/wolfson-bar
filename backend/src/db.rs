@@ -20,6 +20,7 @@ pub(crate) const MIGRATIONS: &[(&str, &str, &[&str])] = &[
     ("017_membership_content", include_str!("../migrations/017_membership_content.sql"), &[]),
     ("018_membership_email_log", include_str!("../migrations/018_membership_email_log.sql"), &["already exists"]),
     ("019_shift_slots", include_str!("../migrations/019_shift_slots.sql"), &["duplicate column"]),
+    ("020_pending_signups", include_str!("../migrations/020_pending_signups.sql"), &["duplicate column"]),
 ];
 
 pub async fn run_migrations(db: &SqlitePool) {

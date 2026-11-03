@@ -1,9 +1,10 @@
 use axum::{
     extract::rejection::JsonRejection,
-    extract::State,
-    http::StatusCode,
+    extract::{ConnectInfo, State},
+    http::{HeaderMap, StatusCode},
     Json,
 };
+use std::net::SocketAddr;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -13,6 +14,7 @@ use uuid::Uuid;
 use webauthn_rs::prelude::*;
 
 use crate::auth::create_jwt_token;
+use crate::routes::magic_link::{client_ip, email_throttle, issue_token, send_link_email, LinkEmail, Throttle};
 use crate::models::{AuthResponse, ErrorResponse, RegisterStartRequest, User};
 
 /// Shared helper for creating a user in the database.
@@ -311,8 +313,13 @@ pub struct RegisterEmailRequest {
     pub email: String,
 }
 
+/// Start an email-only sign-up. Nothing is created yet: the address gets a
+/// link, and redeeming it creates the account. The response is the same
+/// whether or not the address is already registered.
 pub async fn register_with_email(
     State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(req): Json<RegisterEmailRequest>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
     let display_name = req.display_name.trim().to_string();
@@ -326,54 +333,42 @@ pub async fn register_with_email(
         return Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "Invalid email address".to_string() })));
     }
 
-    // Check email uniqueness
-    let existing: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE email = ?)")
-        .bind(&email)
-        .fetch_one(&state.db)
-        .await
-        .unwrap_or(false);
-
-    if existing {
-        return Err((StatusCode::CONFLICT, Json(ErrorResponse { error: "An account with this email already exists. Try signing in instead.".to_string() })));
-    }
-
     let email_service = state.email_service.as_ref().ok_or_else(|| {
         (StatusCode::SERVICE_UNAVAILABLE, Json(ErrorResponse { error: "Email service not configured".to_string() }))
     })?;
 
-    // Create user without passkey via shared helper
-    let user = create_user_in_db(&state.db, Some(display_name), Some(email.clone()), None).await?;
+    let internal = |e: sqlx::Error| {
+        error!("Email sign-up failed: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Database error".to_string() }))
+    };
 
-    info!("📧 Created email-only user: {} ({})", user.id, email);
-
-    // Send magic link so they can sign in immediately
-    let token_bytes: [u8; 32] = rand::random();
-    let token = base64::Engine::encode(
-        &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-        token_bytes,
-    );
-
-    let token_id = uuid::Uuid::new_v4().to_string();
-    sqlx::query("INSERT INTO magic_link_tokens (id, email, token) VALUES (?, ?, ?)")
-        .bind(&token_id)
-        .bind(&email)
-        .bind(&token)
-        .execute(&state.db)
-        .await
-        .ok();
-
-    let link = format!("{}/api/auth/magic-link/verify?token={}", state.public_url, token);
-    let html = format!(
-        r#"<h2>Welcome to Wolfson Cellar Bar!</h2>
-        <p>Your account has been created. Click below to sign in:</p>
-        <p><a href="{}" style="display: inline-block; padding: 12px 24px; background-color: #8B0000; color: white; text-decoration: none; border-radius: 4px;">Sign In</a></p>
-        <p style="color: #666; font-size: 12px;">This link expires in 15 minutes.</p>"#,
-        link
-    );
-
-    if let Err(e) = email_service.send_email(&email, "Welcome to Wolfson Cellar Bar", &html, None).await {
-        error!("Failed to send welcome email: {}", e);
+    let ip = client_ip(addr, &headers);
+    let throttle = if cfg!(debug_assertions) {
+        Throttle::Send
+    } else {
+        email_throttle(&state.db, &email, &ip).await.map_err(internal)?
+    };
+    match throttle {
+        Throttle::Refuse(msg) => {
+            return Err((StatusCode::TOO_MANY_REQUESTS, Json(ErrorResponse { error: msg.to_string() })));
+        }
+        Throttle::Skip => return Ok(StatusCode::OK),
+        Throttle::Send => {}
     }
+
+    let existing: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE email = ?)")
+        .bind(&email)
+        .fetch_one(&state.db)
+        .await
+        .map_err(internal)?;
+
+    let (signup_name, kind) = if existing {
+        (None, LinkEmail::AlreadyRegistered)
+    } else {
+        (Some(display_name.as_str()), LinkEmail::Welcome)
+    };
+    let token = issue_token(&state.db, &email, &ip, signup_name).await.map_err(internal)?;
+    send_link_email(&state, email_service, &email, &token, kind).await;
 
     Ok(StatusCode::OK)
 }

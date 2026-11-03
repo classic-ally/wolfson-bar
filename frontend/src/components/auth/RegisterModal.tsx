@@ -91,8 +91,9 @@ export default function RegisterModal({
         {emailSent ? (
           <div className="space-y-3 text-sm">
             <p>
-              Account created! Check{' '}
-              <strong className="text-foreground">{email}</strong> for a sign-in link.
+              Almost there! Check{' '}
+              <strong className="text-foreground">{email}</strong> for a link to finish
+              creating your account.
             </p>
             <p className="text-muted-foreground">The link expires in 15 minutes.</p>
             <DialogFooter>
