@@ -201,24 +201,37 @@ pub async fn download_event(
     ).into_response())
 }
 
-/// Get user's personal shift calendar feed (uses user_id as auth token)
+/// Former personal feed URL, keyed by user id. Other members can see user
+/// ids, so it no longer serves shifts: subscribers get a single event telling
+/// them to subscribe again from My Shifts.
+pub async fn get_user_calendar_legacy(Path(_user_id): Path<String>) -> Response {
+    let mut calendar = Calendar::new();
+    calendar.name("Wolfson Bar - My Shifts");
+    let today = chrono::Utc::now().date_naive();
+    let mut notice = IcalEvent::new();
+    notice
+        .summary("Wolfson Bar: please re-subscribe to your shift calendar")
+        .description("Your shift calendar has a new private link. Open My Shifts on the Wolfson Cellar Bar site and press Subscribe again.")
+        .all_day(today)
+        .uid("wolfson-bar-calendar-moved");
+    calendar.push(notice.done());
+    ([(header::CONTENT_TYPE, "text/calendar; charset=utf-8")], calendar.to_string()).into_response()
+}
+
+/// A member's personal shift calendar feed, keyed by their private calendar token.
 pub async fn get_user_calendar(
     State(state): State<AppState>,
-    Path(user_id): Path<String>,
+    Path(token): Path<String>,
 ) -> Result<Response, (StatusCode, String)> {
-    // Verify user exists
-    let user_exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE id = ?)")
-        .bind(&user_id)
-        .fetch_one(&state.db)
+    let user_id: String = sqlx::query_scalar("SELECT id FROM users WHERE calendar_token = ?")
+        .bind(&token)
+        .fetch_optional(&state.db)
         .await
         .map_err(|e| {
-            error!("❌ Failed to check user existence: {}", e);
+            error!("❌ Failed to look up calendar token: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
-        })?;
-
-    if !user_exists {
-        return Err((StatusCode::NOT_FOUND, "User not found".to_string()));
-    }
+        })?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Calendar not found".to_string()))?;
 
     // Get user's shifts (today onwards)
     let mut conn = state.db.acquire().await.map_err(|e| {
@@ -272,4 +285,57 @@ pub async fn get_user_calendar(
         [(header::CONTENT_TYPE, "text/calendar; charset=utf-8")],
         ical_string,
     ).into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::routes::users::{get_calendar_token, reset_calendar_token};
+    use crate::auth::AuthenticatedUser;
+    use crate::test_util::{insert_shift_signup, insert_user, test_state, user_with};
+    use axum::Json;
+
+    async fn body(res: Response) -> String {
+        String::from_utf8(axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap()
+    }
+
+    // Impact: other members can see a member's user id, so a feed keyed by it
+    // let them follow that member's schedule indefinitely.
+    // Should: serve a member's shifts only at their private calendar token.
+    // Should not: serve shifts at the old user-id feed address.
+    #[tokio::test]
+    async fn feed_is_served_by_private_token_only() {
+        let state = test_state().await;
+        let member = user_with(true, true, true, true);
+        insert_user(&state.db, &member).await;
+        let tomorrow = (chrono::Utc::now() + chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+        insert_shift_signup(&state.db, &member.id, &tomorrow).await;
+
+        let Json(token) = get_calendar_token(State(state.clone()), AuthenticatedUser(member.clone())).await.unwrap();
+        let feed = body(get_user_calendar(State(state.clone()), Path(token.token)).await.unwrap()).await;
+        assert!(feed.contains("SUMMARY:Bar Shift"), "{feed}");
+
+        let legacy = body(get_user_calendar_legacy(Path(member.id.clone())).await).await;
+        assert!(!legacy.contains("Bar Shift"), "{legacy}");
+        assert!(legacy.contains("re-subscribe"), "{legacy}");
+    }
+
+    // Should: keep the same token across requests until it is reset.
+    // Should not: serve the feed at a token that was reset.
+    #[tokio::test]
+    async fn reset_token_stops_the_old_feed() {
+        let state = test_state().await;
+        let member = user_with(true, true, true, true);
+        insert_user(&state.db, &member).await;
+
+        let Json(first) = get_calendar_token(State(state.clone()), AuthenticatedUser(member.clone())).await.unwrap();
+        let Json(again) = get_calendar_token(State(state.clone()), AuthenticatedUser(member.clone())).await.unwrap();
+        assert_eq!(first.token, again.token);
+
+        let Json(fresh) = reset_calendar_token(State(state.clone()), AuthenticatedUser(member.clone())).await.unwrap();
+        assert_ne!(fresh.token, first.token);
+        let (status, _) = get_user_calendar(State(state.clone()), Path(first.token)).await.expect_err("old token");
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(get_user_calendar(State(state), Path(fresh.token)).await.is_ok());
+    }
 }

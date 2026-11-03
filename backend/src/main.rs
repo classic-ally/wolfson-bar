@@ -22,14 +22,14 @@ use axum::{
     Router,
 };
 use routes::auth::{login_finish, login_start, register_finish, register_start, register_with_email, AppState};
-use routes::users::{get_me, accept_coc, upload_certificate, get_verification_token, update_display_name, submit_contract_request, get_my_overview, update_email, update_email_preferences, delete_my_account, export_my_data, accept_privacy, start_passkey_setup, finish_passkey_setup, get_rota_members};
+use routes::users::{get_me, accept_coc, upload_certificate, get_verification_token, update_display_name, submit_contract_request, get_my_overview, update_email, update_email_preferences, delete_my_account, export_my_data, accept_privacy, start_passkey_setup, finish_passkey_setup, get_rota_members, get_calendar_token, reset_calendar_token};
 use routes::magic_link::{redeem_magic_link, request_magic_link, verify_magic_link};
 use routes::admin::{get_pending_certificates, get_certificate, approve_certificate, verify_induction, get_active_members, get_unallocated_users, get_pending_contracts, approve_contract, get_bar_hours, update_bar_hours, get_overview_stats, get_all_users, promote_user, demote_user, delete_user, admin_mark_induction, admin_unmark_induction, admin_mark_coc, bulk_import_users, admin_upload_certificate, admin_set_contract, admin_clear_contract, admin_set_email, export_members_csv, export_shift_history_csv};
 use routes::induction::{set_induction_availability, remove_induction_availability, get_induction_dates, signup_for_induction, cancel_induction_signup, admin_mark_supervised, admin_unmark_supervised, get_pending_induction_approvals};
 use routes::kiosk::{pair_start, pair_approve, pair_status, pair_info, list_devices, revoke_device, get_checkin_code, check_in, get_bar_status, close_bar};
 use routes::events::{get_events, get_event, create_event, update_event, delete_event};
 use routes::shifts::{get_shifts, signup_for_shift, signup_for_whole_night, cancel_shift_signup, get_my_shifts, admin_assign_to_shift, admin_remove_from_shift};
-use routes::calendar::{get_calendar_feed, download_event, get_user_calendar};
+use routes::calendar::{get_calendar_feed, download_event, get_user_calendar, get_user_calendar_legacy};
 #[cfg(debug_assertions)]
 use routes::local::generate_jwt;
 use routes::stock::{create_product, lookup_barcode, add_barcode, create_transactions, get_products};
@@ -153,7 +153,10 @@ async fn main() {
         .route("/api/events/:id", get(get_event))
         .route("/api/events/calendar.ics", get(get_calendar_feed))
         .route("/api/events/:id/download.ics", get(download_event))
-        .route("/api/users/:user_id/calendar.ics", get(get_user_calendar))
+        .route("/api/users/:user_id/calendar.ics", get(get_user_calendar_legacy))
+        .route("/api/calendar/:token/shifts.ics", get(get_user_calendar))
+        .route("/api/users/me/calendar-token", get(get_calendar_token))
+        .route("/api/users/me/calendar-token/reset", post(reset_calendar_token))
         .route("/api/admin/events", post(create_event))
         .route("/api/admin/events/:id", axum::routing::put(update_event))
         .route("/api/admin/events/:id", axum::routing::delete(delete_event))

@@ -536,6 +536,59 @@ pub async fn update_email(
     Ok(StatusCode::ACCEPTED)
 }
 
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CalendarToken {
+    /// Private token for the member's shift feed at `/api/calendar/:token/shifts.ics`.
+    pub token: String,
+}
+
+fn new_calendar_token() -> String {
+    let bytes: [u8; 32] = rand::random();
+    base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, bytes)
+}
+
+fn calendar_token_error(e: sqlx::Error) -> (StatusCode, Json<ErrorResponse>) {
+    error!("Failed to update calendar token: {}", e);
+    (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: "Failed to get calendar link".to_string() }))
+}
+
+/// The member's private calendar feed token, created on first request.
+pub async fn get_calendar_token(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+) -> Result<Json<CalendarToken>, (StatusCode, Json<ErrorResponse>)> {
+    // Only sets a token when there isn't one, so concurrent first requests agree.
+    sqlx::query("UPDATE users SET calendar_token = ? WHERE id = ? AND calendar_token IS NULL")
+        .bind(new_calendar_token())
+        .bind(&user.id)
+        .execute(&state.db)
+        .await
+        .map_err(calendar_token_error)?;
+    let token: String = sqlx::query_scalar("SELECT calendar_token FROM users WHERE id = ?")
+        .bind(&user.id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(calendar_token_error)?;
+    Ok(Json(CalendarToken { token }))
+}
+
+/// Replace the member's calendar token, so a shared or leaked feed link stops working.
+pub async fn reset_calendar_token(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+) -> Result<Json<CalendarToken>, (StatusCode, Json<ErrorResponse>)> {
+    let token = new_calendar_token();
+    sqlx::query("UPDATE users SET calendar_token = ? WHERE id = ?")
+        .bind(&token)
+        .bind(&user.id)
+        .execute(&state.db)
+        .await
+        .map_err(calendar_token_error)?;
+    info!("Reset calendar token for user {}", user.id);
+    Ok(Json(CalendarToken { token }))
+}
+
 /// Partial update: omitted categories keep their current setting.
 #[derive(Debug, Deserialize, TS)]
 #[ts(export)]

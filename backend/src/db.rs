@@ -23,6 +23,7 @@ pub(crate) const MIGRATIONS: &[(&str, &str, &[&str])] = &[
     ("020_pending_signups", include_str!("../migrations/020_pending_signups.sql"), &["duplicate column"]),
     ("021_email_confirmation", include_str!("../migrations/021_email_confirmation.sql"), &["duplicate column"]),
     ("022_unique_emails", include_str!("../migrations/022_unique_emails.sql"), &["UNIQUE constraint failed"]),
+    ("023_calendar_token", include_str!("../migrations/023_calendar_token.sql"), &["duplicate column"]),
 ];
 
 pub async fn run_migrations(db: &SqlitePool) {

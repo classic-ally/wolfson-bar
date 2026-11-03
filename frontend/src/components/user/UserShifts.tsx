@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getMyShifts, cancelShiftSignup } from '../../lib/auth'
+import { getMyShifts, cancelShiftSignup, getCalendarToken, resetCalendarToken, calendarFeedUrl } from '../../lib/auth'
 import type { UserShift } from '../../types/UserShift'
 import { usePageTitle } from '../../hooks/usePageTitle'
 
@@ -7,11 +7,24 @@ export default function UserShifts() {
   const [shifts, setShifts] = useState<UserShift[]>([])
   const [loading, setLoading] = useState(true)
   const [cancelling, setCancelling] = useState<string | null>(null)
+  const [calendarToken, setCalendarToken] = useState<string | null>(null)
   usePageTitle('My Shifts')
 
   useEffect(() => {
     loadShifts()
+    getCalendarToken().then(setCalendarToken).catch((err) => console.error('Failed to load calendar link:', err))
   }, [])
+
+  const handleResetCalendar = async () => {
+    if (!confirm('Reset your calendar link? Calendars already subscribed will stop updating until you subscribe again.')) {
+      return
+    }
+    try {
+      setCalendarToken(await resetCalendarToken())
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to reset calendar link')
+    }
+  }
 
   const loadShifts = async () => {
     try {
@@ -54,11 +67,6 @@ export default function UserShifts() {
     })
   }
 
-  const getCalendarUrl = () => {
-    const userId = localStorage.getItem('user_id')
-    return `webcal://${window.location.host}/api/users/${userId}/calendar.ics`
-  }
-
   if (loading) {
     return <div style={{ padding: '20px', textAlign: 'center' }}>Loading...</div>
   }
@@ -72,8 +80,10 @@ export default function UserShifts() {
             Your upcoming bar shifts
           </p>
         </div>
+        {calendarToken && (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
         <a
-          href={getCalendarUrl()}
+          href={calendarFeedUrl(calendarToken)}
           style={{
             padding: '10px 20px',
             backgroundColor: '#8B0000',
@@ -87,6 +97,15 @@ export default function UserShifts() {
         >
           📅 Subscribe
         </a>
+        <button
+          onClick={handleResetCalendar}
+          style={{ background: 'none', border: 'none', color: '#666', fontSize: '12px', cursor: 'pointer', textDecoration: 'underline', padding: 0 }}
+          title="Use if you shared your calendar link by mistake"
+        >
+          Reset link
+        </button>
+        </div>
+        )}
       </div>
 
       {shifts.length === 0 ? (

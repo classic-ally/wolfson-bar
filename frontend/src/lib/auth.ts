@@ -17,6 +17,7 @@ import type { PendingContract } from '../types/PendingContract'
 import type { Event } from '../types/Event'
 import type { ShiftInfo } from '../types/ShiftInfo'
 import type { WholeNightSignup } from '../types/WholeNightSignup'
+import type { CalendarToken } from '../types/CalendarToken'
 import type { UserShift } from '../types/UserShift'
 import type { BarHours } from '../types/BarHours'
 import type { OverviewStats } from '../types/OverviewStats'
@@ -729,6 +730,37 @@ export async function cancelShiftSignup(date: string, slot = ''): Promise<void> 
     const error = await response.json()
     throw new AuthError(error.error || 'Failed to cancel signup')
   }
+}
+
+/**
+ * Private token for the member's shift calendar feed, created on first use.
+ */
+export async function getCalendarToken(): Promise<string> {
+  const response = await authenticatedFetch(`${API_BASE}/api/users/me/calendar-token`)
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to get calendar link')
+  }
+  const body: CalendarToken = await response.json()
+  return body.token
+}
+
+/**
+ * Replace the calendar feed token; existing subscriptions stop updating.
+ */
+export async function resetCalendarToken(): Promise<string> {
+  const response = await authenticatedFetch(`${API_BASE}/api/users/me/calendar-token/reset`, { method: 'POST' })
+  if (!response.ok) {
+    const error = await response.json()
+    throw new AuthError(error.error || 'Failed to reset calendar link')
+  }
+  const body: CalendarToken = await response.json()
+  return body.token
+}
+
+/** webcal:// URL for a member's shift feed. */
+export function calendarFeedUrl(token: string): string {
+  return `webcal://${window.location.host}/api/calendar/${encodeURIComponent(token)}/shifts.ics`
 }
 
 /**
